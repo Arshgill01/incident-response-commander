@@ -1,0 +1,20 @@
+-- Build Incident Timeline
+-- Creates a chronological view of suspicious activity
+-- Parameters:
+--   ?time_window: Investigation window (e.g., '2 hours')
+--   ?target_ip: Target IP address
+--   ?target_user: Target username
+
+FROM logs-*
+| WHERE @timestamp > NOW() - ?time_window
+| WHERE source.ip == ?target_ip OR user.name == ?target_user
+| EVAL time_bucket = BUCKET(@timestamp, 5 minutes)
+| STATS 
+    event_count = COUNT(*),
+    unique_categories = COUNT(DISTINCT event.category),
+    unique_actions = COUNT(DISTINCT event.action),
+    first_event = MIN(@timestamp),
+    last_event = MAX(@timestamp)
+  BY time_bucket
+| SORT time_bucket ASC
+| LIMIT 100

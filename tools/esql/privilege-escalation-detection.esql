@@ -1,0 +1,20 @@
+-- Privilege Escalation Detection
+-- Detects suspicious privilege elevation attempts
+-- Parameters:
+--   ?time_window: Time window for detection (e.g., '30 minutes')
+--   ?privilege_change_types: Types of privilege changes (e.g., 'sudo,admin')
+
+FROM logs-*
+| WHERE @timestamp > NOW() - ?time_window
+| WHERE event.category == "process" OR event.category == "authentication"
+| WHERE event.action IN ("sudo", "privilege_escalation", "admin_login", "elevated_process")
+| STATS 
+    escalation_count = COUNT(*),
+    unique_processes = COUNT(DISTINCT process.name),
+    unique_targets = COUNT(DISTINCT process.target.name),
+    first_event = MIN(@timestamp),
+    last_event = MAX(@timestamp)
+  BY user.name, host.name
+| WHERE escalation_count >= 3
+| SORT escalation_count DESC
+| LIMIT 50

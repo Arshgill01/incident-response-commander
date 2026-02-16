@@ -1,0 +1,14 @@
+-- Cross-Index Incident Correlation
+-- Correlates events across multiple indices for comprehensive investigation
+-- Parameters:
+--   ?investigation_window: Time window to investigate (e.g., '4 hours')
+--   ?suspicious_ip: IP address to investigate
+--   ?suspicious_user: Username to investigate
+
+FROM logs-*
+| WHERE @timestamp > NOW() - ?investigation_window
+| WHERE source.ip == ?suspicious_ip OR user.name == ?suspicious_user
+| KEEP @timestamp, event.category, event.action, user.name, source.ip, destination.ip, 
+       destination.port, url.path, file.path, event.outcome, process.name, host.name
+| SORT @timestamp ASC
+| LIMIT 1000

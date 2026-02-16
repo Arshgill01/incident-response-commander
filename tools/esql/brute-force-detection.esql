@@ -1,0 +1,19 @@
+-- Brute Force Attack Detection
+-- Detects multiple failed login attempts from a single IP address
+-- Parameters:
+--   ?time_window: Time window for detection (e.g., '15 minutes')
+--   ?failure_threshold: Minimum number of failures to trigger (e.g., 10)
+
+FROM logs-*
+| WHERE @timestamp > NOW() - ?time_window
+| WHERE event.category == "authentication" AND event.outcome == "failure"
+| STATS 
+    failure_count = COUNT(*),
+    unique_users = COUNT(DISTINCT user.name),
+    unique_hosts = COUNT(DISTINCT host.name),
+    first_failure = MIN(@timestamp),
+    last_failure = MAX(@timestamp)
+  BY source.ip
+| WHERE failure_count >= ?failure_threshold
+| SORT failure_count DESC
+| LIMIT 100
