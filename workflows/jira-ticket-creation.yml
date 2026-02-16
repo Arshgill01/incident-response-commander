@@ -1,0 +1,103 @@
+name: Create Jira Security Ticket
+description: Create detailed Jira tickets for security incident tracking
+
+triggers:
+  - type: manual
+    name: create_jira_ticket
+    description: Create Jira ticket for security incident
+
+steps:
+  # Map severity to Jira priority
+  - name: map_priority
+    type: transform
+    script: |
+      ctx.jira_priority = ctx.incident.severity == 'CRITICAL' ? 'Highest' :
+                          ctx.incident.severity == 'HIGH' ? 'High' :
+                          ctx.incident.severity == 'MEDIUM' ? 'Medium' : 'Low';
+
+  # Build Jira issue payload
+  - name: build_jira_payload
+    type: transform
+    script: |
+      ctx.jira_payload = [
+        "fields": [
+          "project": [
+            "key": ctx.jira_project_key != null ? ctx.jira_project_key : 'SCRUM'
+          ],
+          "summary": "[AUTO] " + ctx.incident.type + " - " + ctx.incident.id,
+          "description": [
+            "h2. Automated Security Incident Report",
+            "",
+            "*Incident ID:* " + ctx.incident.id,
+            "*Detection Time:* " + ctx.incident.detected_at,
+            "*Severity:* " + ctx.incident.severity,
+            "*Status:* " + ctx.incident.status,
+            "",
+            "h3. Incident Summary",
+            ctx.incident.summary,
+            "",
+            "h3. Affected Resources",
+            ctx.incident.affected_resources != null ? ctx.incident.affected_resources : 'N/A',
+            "",
+            "h3. Attack Timeline",
+            ctx.incident.timeline != null ? ctx.incident.timeline : 'Investigation in progress',
+            "",
+            "h3. Indicators of Compromise (IOCs)",
+            ctx.incident.iocs != null ? ctx.incident.iocs : 'N/A',
+            "",
+            "h3. Automated Response Actions Taken",
+            ctx.incident.response_actions != null ? ctx.incident.response_actions : 'No automated actions taken',
+            "",
+            "h3. Investigation Report",
+            "[View detailed report|" + ctx.incident.investigation_report_url + "]",
+            "",
+            "h3. Recommended Next Steps",
+            "- [ ] Validate automated containment measures",
+            "- [ ] Conduct deeper forensic analysis",
+            "- [ ] Notify affected users if required",
+            "- [ ] Update security controls and monitoring",
+            "- [ ] Post-incident review and lessons learned"
+          ].join("\\n"),
+          "issuetype": [
+            "name": "Task"
+          ],
+          "priority": [
+            "name": ctx.jira_priority
+          ],
+          "labels": [
+            "auto-detected",
+            "agent-builder",
+            "security",
+            ctx.incident.type != null ? ctx.incident.type.toLowerCase().replace(' ', '-') : 'incident'
+          ]
+        ]
+      ];
+
+  # Create Jira issue
+  - name: create_jira_issue
+    type: webhook
+    action: post
+    params:
+      url: "{{secrets.jira_url}}/rest/api/2/issue"
+      body: "{{ctx.jira_payload}}"
+      headers:
+        Content-Type: "application/json"
+        Authorization: "Basic {{base64(secrets.jira_email + ':' + secrets.jira_api_token)}}"
+    on_success:
+      - name: store_jira_key
+        type: transform
+        script: |
+          ctx.jira_issue_key = ctx.webhook_response.key;
+
+  # Log ticket creation
+  - name: log_jira_ticket
+    type: elasticsearch
+    action: index
+    params:
+      index: incident-response-log
+      document:
+        incident_id: "{{ctx.incident.id}}"
+        action: "jira_ticket_created"
+        timestamp: "{{now}}"
+        jira_issue_key: "{{ctx.jira_issue_key}}"
+        jira_project: "{{ctx.jira_project_key}}"

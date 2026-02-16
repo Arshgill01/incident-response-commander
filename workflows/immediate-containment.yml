@@ -1,0 +1,91 @@
+name: Immediate Incident Containment
+description: Automatically contain security threats by blocking IPs, disabling accounts, and terminating sessions
+
+# Trigger: Can be called manually or by alert
+triggers:
+  - type: manual
+    name: incident_detected
+    description: Triggered when an incident is confirmed
+
+# Workflow steps
+steps:
+  # Step 1: Log the incident response initiation
+  - name: log_response_start
+    type: elasticsearch
+    action: index
+    params:
+      index: incident-response-log
+      document:
+        incident_id: "{{ctx.incident.id}}"
+        action: "containment_initiated"
+        timestamp: "{{now}}"
+        severity: "{{ctx.incident.severity}}"
+        responder: "automated"
+
+  # Step 2: Evaluate severity and take appropriate actions
+  - name: evaluate_and_contain
+    type: condition
+    if: "ctx.incident.severity == 'CRITICAL' || ctx.incident.severity == 'HIGH'"
+    then:
+      # Block malicious IPs
+      - name: block_malicious_ips
+        type: webhook
+        action: post
+        params:
+          url: "{{secrets.firewall_api_url}}/block"
+          body:
+            ips: "{{ctx.incident.iocs.malicious_ips}}"
+            reason: "Security incident {{ctx.incident.id}} - Automated block"
+            duration: "24h"
+          headers:
+            Authorization: "Bearer {{secrets.firewall_api_token}}"
+        on_failure: continue
+
+      # Disable compromised accounts
+      - name: disable_accounts
+        type: webhook
+        action: post
+        params:
+          url: "{{secrets.identity_api_url}}/disable"
+          body:
+            users: "{{ctx.incident.affected_users}}"
+            reason: "Security incident {{ctx.incident.id}}"
+            notify_users: false
+        on_failure: continue
+
+      # Terminate active sessions
+      - name: terminate_sessions
+        type: elasticsearch
+        action: index
+        params:
+          index: session-termination-requests
+          document:
+            incident_id: "{{ctx.incident.id}}"
+            users: "{{ctx.incident.affected_users}}"
+            action: "terminate_all_sessions"
+            timestamp: "{{now}}"
+
+    else:
+      # Log for medium/low severity
+      - name: log_low_severity
+        type: elasticsearch
+        action: index
+        params:
+          index: incident-response-log
+          document:
+            incident_id: "{{ctx.incident.id}}"
+            action: "monitoring_enhanced"
+            severity: "{{ctx.incident.severity}}"
+            message: "Low severity incident - Enhanced monitoring activated"
+
+  # Step 3: Log completion
+  - name: log_containment_complete
+    type: elasticsearch
+    action: index
+    params:
+      index: incident-response-log
+      document:
+        incident_id: "{{ctx.incident.id}}"
+        action: "containment_complete"
+        timestamp: "{{now}}"
+        actions_taken: "{{ctx.actions_executed}}"

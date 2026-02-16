@@ -1,0 +1,97 @@
+name: Send Slack Security Alert
+description: Send formatted security incident notifications to Slack
+
+triggers:
+  - type: manual
+    name: notify_slack
+    description: Send Slack notification for security incident
+
+steps:
+  # Build Slack message payload
+  - name: build_slack_message
+    type: transform
+    script: |
+      // Determine color based on severity
+      def color = ctx.incident.severity == 'CRITICAL' ? '#FF0000' :
+                  ctx.incident.severity == 'HIGH' ? '#FF8C00' :
+                  ctx.incident.severity == 'MEDIUM' ? '#FFD700' : '#00FF00';
+      
+      // Determine emoji based on severity
+      def emoji = ctx.incident.severity == 'CRITICAL' ? '🚨' :
+                  ctx.incident.severity == 'HIGH' ? '⚠️' :
+                  ctx.incident.severity == 'MEDIUM' ? '🔍' : 'ℹ️';
+      
+      ctx.slack_payload = [
+        "channel": ctx.slack_channel != null ? ctx.slack_channel : "#security-incidents",
+        "username": "IncidentResponseBot",
+        "icon_emoji": ":shield:",
+        "attachments": [
+          [
+            "color": color,
+            "title": emoji + " Security Incident: " + ctx.incident.id,
+            "title_link": ctx.incident.investigation_report_url,
+            "fields": [
+              [
+                "title": "Type",
+                "value": ctx.incident.type,
+                "short": true
+              ],
+              [
+                "title": "Severity",
+                "value": ctx.incident.severity,
+                "short": true
+              ],
+              [
+                "title": "Status",
+                "value": ctx.incident.status,
+                "short": true
+              ],
+              [
+                "title": "Detected At",
+                "value": ctx.incident.detected_at,
+                "short": true
+              ],
+              [
+                "title": "Affected Users",
+                "value": ctx.incident.affected_users != null ? ctx.incident.affected_users.join(', ') : 'N/A',
+                "short": false
+              ],
+              [
+                "title": "Affected IPs",
+                "value": ctx.incident.affected_ips != null ? ctx.incident.affected_ips.join(', ') : 'N/A',
+                "short": false
+              ],
+              [
+                "title": "Summary",
+                "value": ctx.incident.summary,
+                "short": false
+              ]
+            ],
+            "footer": "Incident Response Commander",
+            "footer_icon": "https://elastic.co/favicon.ico",
+            "ts": "{{now / 1000}}"
+          ]
+        ]
+      ];
+
+  # Send to Slack
+  - name: send_to_slack
+    type: webhook
+    action: post
+    params:
+      url: "{{secrets.slack_webhook_url}}"
+      body: "{{ctx.slack_payload}}"
+      headers:
+        Content-Type: "application/json"
+
+  # Log notification sent
+  - name: log_notification
+    type: elasticsearch
+    action: index
+    params:
+      index: incident-response-log
+      document:
+        incident_id: "{{ctx.incident.id}}"
+        action: "slack_notification_sent"
+        timestamp: "{{now}}"
+        channel: "{{ctx.slack_channel}}"

@@ -1,0 +1,86 @@
+name: Preserve Forensic Evidence
+description: Snapshot and preserve logs and data for forensic investigation
+
+triggers:
+  - type: manual
+    name: preserve_evidence
+    description: Preserve evidence for security incident
+
+steps:
+  # Step 1: Determine indices to snapshot
+  - name: identify_indices
+    type: transform
+    script: |
+      // Default security-related indices
+      def defaultIndices = ['logs-*', 'audit-*', 'auth-*', 'proxy-*'];
+      ctx.indices_to_snapshot = ctx.incident.indices != null ? ctx.incident.indices : defaultIndices;
+      ctx.snapshot_name = "incident-" + ctx.incident.id + "-" + ctx.now;
+
+  # Step 2: Create snapshot of relevant indices
+  - name: create_snapshot
+    type: elasticsearch
+    action: snapshot
+    params:
+      repository: "forensic-snapshots"
+      snapshot: "{{ctx.snapshot_name}}"
+      indices: "{{ctx.indices_to_snapshot}}"
+      wait_for_completion: true
+      metadata:
+        incident_id: "{{ctx.incident.id}}"
+        created_by: "incident-response-commander"
+        timestamp: "{{now}}"
+        retention_days: 90
+    on_failure: continue
+
+  # Step 3: Export key events to dedicated incident index
+  - name: export_key_events
+    type: elasticsearch
+    action: reindex
+    params:
+      source:
+        index: "{{ctx.indices_to_snapshot}}"
+        query:
+          range:
+            "@timestamp":
+              gte: "{{ctx.incident.time_range.start}}"
+              lte: "{{ctx.incident.time_range.end}}"
+          bool:
+            should:
+              - term:
+                  "source.ip": "{{ctx.incident.iocs.malicious_ips}}"
+              - term:
+                  "user.name": "{{ctx.incident.affected_users}}"
+      dest:
+        index: "incident-evidence-{{ctx.incident.id}}"
+      script:
+        source: |
+          ctx._source.incident_id = params.incident_id;
+          ctx._source.evidence_type = 'forensic';
+        params:
+          incident_id: "{{ctx.incident.id}}"
+
+  # Step 4: Lock the evidence index (make it read-only)
+  - name: lock_evidence_index
+    type: elasticsearch
+    action: put_settings
+    params:
+      index: "incident-evidence-{{ctx.incident.id}}"
+      settings:
+        index.blocks.write: true
+        index.blocks.read_only: true
+
+  # Step 5: Log evidence preservation
+  - name: log_evidence_preservation
+    type: elasticsearch
+    action: index
+    params:
+      index: incident-response-log
+      document:
+        incident_id: "{{ctx.incident.id}}"
+        action: "evidence_preserved"
+        timestamp: "{{now}}"
+        snapshot_name: "{{ctx.snapshot_name}}"
+        evidence_index: "incident-evidence-{{ctx.incident.id}}"
+        indices_snapshoted: "{{ctx.indices_to_snapshot}}"
+        retention_days: 90
+        chain_of_custody: "automated"
