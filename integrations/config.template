@@ -1,0 +1,53 @@
+# Configuration
+
+## Elastic Cloud Settings
+
+Create a `.env` file in the root directory with:
+
+```env
+# Elastic Cloud
+ELASTIC_CLOUD_ID=your-cloud-id
+ELASTIC_API_KEY=<YOUR_ELASTIC_API_KEY>
+KIBANA_URL=your-kibana-url
+
+# Slack
+SLACK_WEBHOOK_URL=https://hooks.slack.com/services/YOUR/WEBHOOK/URL
+SLACK_CHANNEL=#security-incidents
+
+# Jira
+JIRA_URL=https://your-instance.atlassian.net
+JIRA_API_TOKEN=your-api-token
+JIRA_PROJECT_KEY=SEC
+```
+
+## Security Note
+
+**NEVER commit the `.env` file to git!** It's already in `.gitignore`.
+
+## Getting Credentials
+
+### Elastic Cloud API Key
+Already provided: `<YOUR_ELASTIC_API_KEY>`
+
+### Slack Webhook
+1. Go to https://api.slack.com/apps
+2. Create New App → From scratch
+3. Name: "Incident Response Bot"
+4. Select your workspace
+5. Go to "Incoming Webhooks" → Activate
+6. Add New Webhook to Workspace
+7. Select channel: #security-incidents
+8. Copy the webhook URL
+
+### Jira API Token
+1. Go to https://id.atlassian.com/manage-profile/security/api-tokens
+2. Create API Token
+3. Name: "Incident Response Commander"
+4. Copy the token
+
+## Deployment Requirements
+
+- Elastic Cloud: Security solution view
+- Minimum: Storage optimized tier
+- Version: 9.x or later
+- Agent Builder: Enabled
