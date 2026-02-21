@@ -4,15 +4,15 @@
 --   ?time_window: Time window for detection (e.g., '1 hour')
 --   ?bytes_threshold: Minimum bytes transferred (e.g., 1000000000 for 1GB)
 
-FROM logs-*
+FROM security-simulated-events
 | WHERE @timestamp > NOW() - ?time_window
-| WHERE event.category == "network" AND network.direction == "outbound"
+| WHERE `event.category` == "network" AND `network.direction` == "outbound"
 | STATS 
-    total_bytes = SUM(destination.bytes),
+    total_bytes = SUM(`network.bytes`),
     connection_count = COUNT(*),
-    unique_destinations = COUNT(DISTINCT destination.ip),
-    unique_ports = COUNT(DISTINCT destination.port)
-  BY user.name, source.ip
+    unique_destinations = COUNT(DISTINCT `destination.ip`),
+    unique_ports = COUNT(DISTINCT `destination.port`)
+  BY `user.name`, `source.ip`
 | WHERE total_bytes >= ?bytes_threshold
 | SORT total_bytes DESC
 | LIMIT 50
