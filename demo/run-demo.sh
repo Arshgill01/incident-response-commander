@@ -46,7 +46,21 @@ from elasticsearch import Elasticsearch
 import os
 from dotenv import load_dotenv
 load_dotenv()
-es = Elasticsearch(cloud_id=os.getenv('ELASTIC_CLOUD_ID'), api_key=os.getenv('ELASTIC_API_KEY'))
+cloud_id = os.getenv('ELASTIC_CLOUD_ID')
+api_key = os.getenv('ELASTIC_API_KEY')
+username = os.getenv('ELASTIC_USERNAME', 'elastic')
+password = os.getenv('ELASTIC_PASSWORD')
+es = None
+if api_key and api_key.strip():
+    try:
+        es = Elasticsearch(cloud_id=cloud_id, api_key=api_key, request_timeout=30)
+        es.info()
+    except Exception:
+        es = None
+if es is None and password and password.strip():
+    es = Elasticsearch(cloud_id=cloud_id, basic_auth=(username, password), request_timeout=30)
+if es is None:
+    raise SystemExit('No valid credentials found in .env')
 print('✅ Connected to Elasticsearch:', es.info()['version']['number'])
 "
 
@@ -74,7 +88,7 @@ cd ..
 
 echo ""
 echo "📊 Attack injected successfully!"
-echo "   - Source IP: 192.168.x.x"
+echo "   - Source IP: 192.168.1.100"
 echo "   - Target User: admin"
 echo "   - Failed Attempts: 20-30"
 echo "   - Successful Breach: Yes"
