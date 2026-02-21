@@ -1,10 +1,10 @@
 # Incident Response Commander
 
-An autonomous multi-agent security incident response system powered by Elastic Agent Builder.
+A multi-agent security incident response system built with Elastic Agent Builder for the Elastic Agent Builder Hackathon.
 
 ## Overview
 
-Incident Response Commander is a sophisticated AI-driven system that autonomously detects, investigates, and responds to security incidents. It uses three specialized agents working together to provide end-to-end incident response automation.
+Incident Response Commander uses three specialized AI agents working in a pipeline (Detector -> Investigator -> Responder) to detect, investigate, and respond to security incidents. Each agent has custom ES|QL tools for querying security event data stored in Elasticsearch.
 
 ## Architecture
 
@@ -18,47 +18,42 @@ Incident Response Commander is a sophisticated AI-driven system that autonomousl
 │  │  Agent   │    │   Agent   │    │   Agent  │      │
 │  └──────────┘    └──────────┘    └──────────┘      │
 │       │               │               │            │
-│   ES|QL + ML      ES|QL JOINs    Workflows +      │
-│   Anomaly         Correlation    MCP Actions      │
-│   Detection                                    │
+│   ES|QL            ES|QL           Kibana          │
+│   Detection        Correlation     Connectors      │
+│   Queries          & Timeline      (Slack, Jira)   │
 │                                                      │
 └─────────────────────────────────────────────────────┘
-                              │
-                    ┌─────────┴─────────┐
-                    │                   │
-                 Slack              Jira Cloud
-              Notifications         Tickets
 ```
 
 ## Features
 
-- **Multi-Agent System**: Three specialized agents for detection, investigation, and response
+- **Multi-Agent Pipeline**: Three specialized agents for detection, investigation, and response
+- **ES|QL-Powered Detection**: 5 custom ES|QL tools for querying security event patterns
 - **Multiple Incident Types**: Brute force attacks, data exfiltration, privilege escalation
-- **Automated Response**: IP blocking, account disabling, session termination
-- **Team Integration**: Slack notifications and Jira ticket creation
-- **Context Engineering**: ES|QL for complex cross-index correlations
+- **Team Integration**: Slack notifications and Jira ticket creation via Kibana Connectors
+- **Demo Simulation**: Python scripts to generate synthetic attack events for testing
 
 ## Incident Types Supported
 
-1. **Brute Force Attacks**: Detects multiple failed login attempts
-2. **Data Exfiltration**: Identifies unusual data transfer volumes
-3. **Privilege Escalation**: Detects unauthorized access elevation
+1. **Brute Force Attacks** - Detects multiple failed login attempts from a single IP
+2. **Data Exfiltration** - Identifies unusual outbound data transfer volumes
+3. **Privilege Escalation** - Detects suspicious privilege elevation attempts
 
 ## Technologies Used
 
-- **Elastic Agent Builder**: Agent orchestration and reasoning
-- **ES|QL**: Complex security queries and correlations
-- **Elastic Workflows**: Automated response actions
-- **MCP Protocol**: External integrations (Slack, Jira)
-- **Machine Learning**: Anomaly detection
+- **Elastic Agent Builder** - Agent orchestration with custom instructions and tools
+- **ES|QL** - Security queries with aggregations and time-series analysis
+- **Elasticsearch** - Data storage, indexing, and ILM policies
+- **Kibana Connectors** - Slack and Jira integration for the Responder agent
+- **Python** - Data ingestion and attack simulation scripts
 
 ## Quick Start
 
 ### Prerequisites
-- Elastic Cloud account with Security deployment
-- Slack workspace
-- Jira Cloud account
+- Elastic Cloud account (9.x with Agent Builder enabled)
 - Python 3.8+
+- Slack workspace (for notifications)
+- Jira Cloud account (for ticket creation)
 
 ### 1. Clone Repository
 ```bash
@@ -69,24 +64,25 @@ pip install -r requirements.txt
 
 ### 2. Configure Environment
 ```bash
-# Edit .env file with your credentials
-# Elastic Cloud, Slack, and Jira credentials already configured
+cp .env.example .env
+# Edit .env with your Elastic Cloud credentials
+# Supports both API key and username/password authentication
 ```
 
 ### 3. Manual Setup in Kibana
 Follow [MANUAL_SETUP.md](MANUAL_SETUP.md) to configure:
-- 5 custom ES|QL tools
-- 3 AI agents
-- 4 automated workflows
+- 5 custom ES|QL tools in Agent Builder
+- 3 AI agents in Agent Builder
+- Slack and Jira Connectors in Stack Management
 
-### 4. Test the System
+### 4. Ingest Data and Test
 ```bash
 cd demo
-python3 data-ingestion.py              # Ingest sample data
-python3 incident-simulator.py brute_force  # Simulate attack
+python3 data-ingestion.py                          # Ingest sample security events
+python3 incident-simulator.py brute_force          # Simulate a brute force attack
 ```
 
-### 5. Run Demo
+### 5. Run the Demo
 ```bash
 ./demo/run-demo.sh
 ```
@@ -100,23 +96,21 @@ python3 incident-simulator.py brute_force  # Simulate attack
 ## Repository Structure
 
 ```
-├── agents/          # Agent configurations (JSON)
+├── agents/          # Agent configurations (JSON reference files)
 ├── tools/esql/      # ES|QL detection queries
-├── workflows/       # Automation workflows (YAML)
-├── demo/           # Testing and simulation scripts
-├── docs/           # Documentation
-└── submission/     # Hackathon submission files
+├── workflows/       # Response workflow reference designs (YAML)
+├── demo/            # Data ingestion, simulation, and demo scripts
+├── docs/            # Documentation
+└── submission/      # Hackathon submission files
 ```
 
 ## Demo Flow
 
-1. **Simulate Attack** - Inject synthetic security events
-2. **Detection** - Agent identifies brute force pattern
-3. **Investigation** - Agent correlates events across indices
-4. **Response** - Automated containment + notifications
-5. **Result** - Slack alert + Jira ticket created
-
-**Total Response Time: < 60 seconds**
+1. **Simulate Attack** - Inject synthetic security events into Elasticsearch
+2. **Detection** - Detector agent identifies attack patterns using ES|QL
+3. **Investigation** - Investigator agent correlates events and builds timeline
+4. **Response** - Responder agent coordinates containment and notifications
+5. **Result** - Slack alert sent and Jira ticket created
 
 ## License
 

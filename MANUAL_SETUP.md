@@ -20,7 +20,9 @@ Description: Detect brute force attack patterns from authentication logs
 
 **Parameters to add:**
 1. `time_window` (Time Duration) - Default: "15 minutes"
-2. `failure_threshold` (Integer) - Default: 10
+2. `failure_threshold` (Integer) - Default: 5
+
+**ES|QL Note:** Ensure nested fields use backticks (`` `event.category` ``) and aggregations use `COUNT_DISTINCT()` syntax.
 
 ---
 
@@ -35,7 +37,7 @@ Description: Detect unusual outbound data transfers indicating exfiltration
 
 **Parameters to add:**
 1. `time_window` (Time Duration) - Default: "1 hour"
-2. `bytes_threshold` (Integer) - Default: 1000000000
+2. `bytes_threshold` (Integer) - Default: 100000000
 
 ---
 
@@ -57,7 +59,7 @@ Description: Detect suspicious privilege elevation attempts
 ```
 Name: incident-correlation
 Type: ES|QL
-Description: Cross-index correlation for comprehensive incident investigation
+Description: Correlate events for comprehensive incident investigation
 ```
 
 **Copy ES|QL Query from:** `tools/esql/incident-correlation.esql`
@@ -93,20 +95,19 @@ Navigate to: **Agent Builder → Agents → New Agent**
 
 **Settings Tab:**
 ```
-Agent ID: security-detector
 Display Name: Security Incident Detector
-Description: Continuously monitors security logs to detect brute force attacks, data exfiltration, and privilege escalation attempts
+Description: Monitors security logs to detect brute force attacks, data exfiltration, and privilege escalation attempts
 Avatar: Red shield
 ```
 
 **Instructions:** Copy from `agents/detector-agent.json` (the "instructions" field)
 
 **Tools Tab - Select these tools:**
-- ☑️ brute-force-detection
-- ☑️ data-exfiltration-detection
-- ☑️ privilege-escalation-detection
-- ☑️ platform.core.search
-- ☑️ platform.core.list_indices
+- brute-force-detection
+- data-exfiltration-detection
+- privilege-escalation-detection
+- platform.core.search
+- platform.core.list_indices
 
 ---
 
@@ -114,20 +115,19 @@ Avatar: Red shield
 
 **Settings Tab:**
 ```
-Agent ID: incident-investigator
 Display Name: Incident Investigator
-Description: Performs deep forensic analysis of security incidents using multi-source correlation and timeline reconstruction
+Description: Performs forensic analysis of security incidents using event correlation and timeline reconstruction
 Avatar: Orange search
 ```
 
 **Instructions:** Copy from `agents/investigator-agent.json`
 
 **Tools Tab - Select these tools:**
-- ☑️ incident-correlation
-- ☑️ timeline-builder
-- ☑️ platform.core.search
-- ☑️ platform.core.get_document_by_id
-- ☑️ platform.core.get_index_mapping
+- incident-correlation
+- timeline-builder
+- platform.core.search
+- platform.core.get_document_by_id
+- platform.core.get_index_mapping
 
 ---
 
@@ -135,106 +135,71 @@ Avatar: Orange search
 
 **Settings Tab:**
 ```
-Agent ID: incident-responder
 Display Name: Incident Responder
-Description: Executes automated containment actions and coordinates incident response through Slack and Jira integration
+Description: Coordinates incident response through Slack notifications and Jira ticket creation
 Avatar: Green bolt
 ```
 
 **Instructions:** Copy from `agents/responder-agent.json`
 
 **Tools Tab:**
-Note: Workflow tools need to be created first (Step 3), then assigned here.
+Assign Slack and Jira connector tools after creating them in Step 3.
 
 ---
 
-## Step 3: Create Workflows (4 Workflows)
+## Step 3: Create Kibana Connectors (for Responder Agent)
 
-Navigate to: **Stack Management → Workflows → Create Workflow**
+Navigate to: **Stack Management → Connectors → Create Connector**
 
-### Workflow 1: Immediate Containment
-```yaml
-# Copy content from: workflows/immediate-containment.yml
-# Configure secrets for firewall API if available
-```
+### Connector 1: Slack Notification
+- **Type**: Slack (Webhook)
+- **Name**: `Security Slack Notification`
+- **Webhook URL**: Your Slack incoming webhook URL
 
----
+### Connector 2: Jira Ticket Creation
+- **Type**: Jira
+- **Name**: `Security Jira Tickets`
+- **URL**: Your Jira instance URL (e.g., `https://your-instance.atlassian.net`)
+- **Email**: Your Jira account email
+- **API Token**: Your Jira API token
+- **Project Key**: `SCRUM`
 
-### Workflow 2: Slack Notification
-```yaml
-# Copy content from: workflows/slack-notification.yml
-# Secret to configure: slack_webhook_url
-```
+After creating connectors, go back to the Responder agent and assign the connector tools.
 
-**Configure Secret:**
-1. Go to **Stack Management → Secrets**
-2. Create secret: `slack_webhook_url`
-3. Value: `<YOUR_SLACK_WEBHOOK_URL>`
+**Note:** The `workflows/` directory contains YAML reference designs that illustrate the intended response logic. The actual integrations use Kibana Connectors as described above.
 
 ---
 
-### Workflow 3: Jira Ticket Creation
-```yaml
-# Copy content from: workflows/jira-ticket-creation.yml
-# Secrets to configure: jira_url, jira_email, jira_api_token
-```
+## Step 4: Test the System
 
-**Configure Secrets:**
-1. `jira_url`: `<YOUR_JIRA_URL>`
-2. `jira_email`: Your email
-3. `jira_api_token`: `<YOUR_JIRA_API_TOKEN>`
-
----
-
-### Workflow 4: Evidence Preservation
-```yaml
-# Copy content from: workflows/evidence-preservation.yml
-```
-
----
-
-## Step 4: Assign Workflow Tools to Responder Agent
-
-Go back to **Agent Builder → Agents → incident-responder → Edit**
-
-**Tools Tab - Add workflow tools:**
-- ☑️ immediate-containment
-- ☑️ slack-notification
-- ☑️ jira-ticket-creation
-- ☑️ evidence-preservation
-
----
-
-## Step 5: Test the System
-
-### 5.1 Ingest Sample Data
+### 4.1 Ingest Sample Data
 
 ```bash
-cd /path/to/incident-response-commander/demo
+cd demo
 python3 data-ingestion.py
 ```
 
-### 5.2 Simulate an Attack
+### 4.2 Simulate an Attack
 
 ```bash
 python3 incident-simulator.py brute_force
 ```
 
-### 5.3 Test Detection
+### 4.3 Test Detection
 
 1. Go to **Agent Builder → Chat**
 2. Select **"Security Incident Detector"**
 3. Type: "Detect brute force attacks in the last 15 minutes"
 4. Verify it finds the simulated attack
 
-### 5.4 Test Investigation
+### 4.4 Test Investigation
 
 1. Switch to **"Incident Investigator"**
 2. Provide the suspicious IP from detection
 3. Type: "Investigate IP [IP_ADDRESS] and build timeline"
 4. Verify it correlates events
 
-### 5.5 Test Response
+### 4.5 Test Response
 
 1. Switch to **"Incident Responder"**
 2. Type: "Execute response for this CRITICAL incident"
@@ -243,36 +208,18 @@ python3 incident-simulator.py brute_force
 
 ---
 
-## Step 6: Push to GitHub
+## Step 5: Push to GitHub
 
 ```bash
 cd /path/to/incident-response-commander
-
-# Initialize git (if not done)
-git init
-
-# Add all files
 git add .
-
-# Commit
-git commit -m "Initial commit: Incident Response Commander for Elastic Agent Builder Hackathon
-
-- 3 specialized agents (Detector, Investigator, Responder)
-- 5 custom ES|QL detection tools
-- 4 automated workflows (Containment, Slack, Jira, Evidence)
-- 3 incident types (Brute Force, Data Exfiltration, Privilege Escalation)
-- Full documentation and demo scripts"
-
-# Add remote (replace with your repo)
-git remote add origin https://github.com/arshgill01/incident-response-commander.git
-
-# Push
-git push -u origin main
+git commit -m "Incident Response Commander for Elastic Agent Builder Hackathon"
+git push -u origin master
 ```
 
 ---
 
-## Step 7: Submit to Devpost
+## Step 6: Submit to Devpost
 
 ### Required Submission Elements:
 
@@ -281,37 +228,31 @@ git push -u origin main
 
 2. **Demo Video** (3 minutes)
    - Record screen showing:
-     - System architecture
+     - System architecture overview
      - Simulated attack injection
-     - Detection by Agent
+     - Detection by Detector agent
      - Investigation results
-     - Response actions
-     - Slack/Jira notifications
+     - Response actions (Slack/Jira)
 
 3. **GitHub Repository URL**
-   - Your GitHub repo link
-
-4. **Social Media Post** (Bonus points)
-   - Post about your project on Twitter/LinkedIn
-   - Tag @elastic_devs
-   - Include repository link
+   - https://github.com/arshgill01/incident-response-commander
 
 ---
 
 ## Quick Reference: File Locations
 
 ```
-├── agents/                    # Agent configurations
+├── agents/                    # Agent configurations (JSON reference)
 │   ├── detector-agent.json
 │   ├── investigator-agent.json
 │   └── responder-agent.json
-├── tools/esql/               # ES|QL queries
+├── tools/esql/               # ES|QL queries for tools
 │   ├── brute-force-detection.esql
 │   ├── data-exfiltration-detection.esql
 │   ├── privilege-escalation-detection.esql
 │   ├── incident-correlation.esql
 │   └── timeline-builder.esql
-├── workflows/                # Workflow definitions
+├── workflows/                # Response workflow reference designs (YAML)
 │   ├── immediate-containment.yml
 │   ├── slack-notification.yml
 │   ├── jira-ticket-creation.yml
@@ -319,6 +260,7 @@ git push -u origin main
 ├── demo/                     # Testing scripts
 │   ├── data-ingestion.py
 │   ├── incident-simulator.py
+│   ├── test-connection.py
 │   └── run-demo.sh
 └── docs/                     # Documentation
     ├── SETUP.md
@@ -336,38 +278,35 @@ git push -u origin main
 
 ### Tools not working?
 - Verify ES|QL syntax in Dev Tools first
-- Check index patterns exist
-- Verify parameters are configured
+- Check that `security-simulated-events` index exists
+- Ensure nested fields use backticks
+- Use `COUNT_DISTINCT()` not `COUNT(DISTINCT ...)`
 
-### Workflows failing?
-- Check secret configuration
-- Verify webhook URLs are correct
-- Review execution logs
+### Connectors not working?
+- Check connector configuration in Stack Management
+- Verify webhook URLs and API tokens are correct
+- Test connectors individually before assigning to agent
 
 ### No data detected?
-- Run data-ingestion.py first
+- Run `data-ingestion.py` first
+- Run `incident-simulator.py` to generate attack events
 - Check time ranges in queries
-- Verify indices exist in Stack Management
+- Verify index exists: Stack Management → Index Management
 
 ---
 
-## Success Criteria ✅
+## Success Criteria
 
 After completing all steps, you should have:
 
-- [ ] 5 custom ES|QL tools created
-- [ ] 3 custom agents configured
-- [ ] 4 workflows with secrets
-- [ ] Sample data ingested
-- [ ] Successfully tested all 3 incident types
-- [ ] Slack notifications working
-- [ ] Jira tickets created
+- [ ] 5 custom ES|QL tools created in Agent Builder
+- [ ] 3 custom agents configured in Agent Builder
+- [ ] Slack and Jira connectors set up
+- [ ] Sample data ingested into `security-simulated-events`
+- [ ] Successfully tested detection with simulated attack
 - [ ] GitHub repository pushed
-- [ ] Demo video recorded
 - [ ] Devpost submission complete
 
 ---
 
-**You're ready to win! 🚀**
-
-Estimated time to complete manual setup: **2-3 hours**
+Estimated time to complete manual setup: **1-2 hours**

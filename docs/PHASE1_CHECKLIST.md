@@ -55,7 +55,7 @@
 - [ ] In Jira, click "Create project"
 - [ ] Select "Kanban"
 - [ ] Name: "Security Operations"
-- [ ] Key: "SEC"
+- [ ] Key: "SCRUM"
 - [ ] Create
 
 ### 8. Get API Token
@@ -97,7 +97,7 @@ curl -X POST -H 'Content-type: application/json' \
 curl -u your-email:your-api-token \
   https://your-instance.atlassian.net/rest/api/3/project
 ```
-- [ ] Should see list of projects including "SEC"
+- [ ] Should see list of projects including "SCRUM"
 
 ## Phase 1 Complete When:
 - [ ] Elastic Security deployment running

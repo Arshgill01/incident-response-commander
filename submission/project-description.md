@@ -1,45 +1,44 @@
 # Incident Response Commander
 
-**Autonomous Multi-Agent Security Incident Response System**
+**Multi-Agent Security Incident Response System**
 
 ## Problem Statement
 
-Security Operations Centers (SOCs) face an overwhelming challenge: they receive thousands of alerts daily but lack the resources to investigate each one thoroughly. The average Mean Time to Detect (MTTD) a breach is 197 days, and Mean Time to Respond (MTTR) exceeds 24 hours. This delay allows attackers to maintain persistence, exfiltrate data, and cause significant damage. Current solutions require manual investigation and response, creating bottlenecks that sophisticated attackers exploit.
+Security Operations Centers (SOCs) face an overwhelming challenge: they receive thousands of alerts daily but lack the resources to investigate each one thoroughly. Manual investigation and response create bottlenecks — analysts must context-switch between detection tools, investigation consoles, and communication platforms. This fragmented process slows response times and allows attackers to maintain persistence.
 
 ## Solution Overview
 
-Incident Response Commander is an autonomous multi-agent AI system built on Elastic Agent Builder that detects, investigates, and responds to security incidents without human intervention. The system uses three specialized agents working in concert: a Detector agent that continuously monitors security logs for attack patterns, an Investigator agent that performs deep forensic analysis using cross-index correlations, and a Responder agent that executes automated containment actions and coordinates the response team through Slack and Jira integration.
+Incident Response Commander is a multi-agent AI system built on Elastic Agent Builder that streamlines the detect-investigate-respond workflow. The system uses three specialized agents working in a pipeline: a Detector agent that identifies attack patterns in security logs, an Investigator agent that correlates events and builds timelines, and a Responder agent that coordinates containment actions and notifies the team through Slack and Jira.
 
 ## Technical Implementation
 
-The system leverages Elastic Agent Builder's full capabilities. I created five custom ES|QL tools for precise detection: Brute Force Detection identifies multiple failed logins from single IPs; Data Exfiltration Detection monitors unusual outbound data transfers using baseline comparisons; Privilege Escalation Detection tracks suspicious elevation attempts; Incident Correlation uses ES|QL JOINs across multiple indices to build comprehensive attack timelines; and Timeline Builder creates chronological views of suspicious activity.
+The system is built around five custom ES|QL tools created in Elastic Agent Builder. Brute Force Detection identifies clusters of failed authentication attempts from single IP addresses using time-windowed aggregations. Data Exfiltration Detection monitors outbound data transfer volumes grouped by user. Privilege Escalation Detection tracks suspicious elevation attempts by process category. Incident Correlation queries all events related to a suspicious IP or user across a configurable investigation window. Timeline Builder creates chronological views of activity using time bucketing.
 
-Each agent has carefully crafted instructions defining their role, capabilities, and boundaries. The Detector uses statistical thresholds and time-based analysis to classify incidents by severity (CRITICAL/HIGH/MEDIUM/LOW). The Investigator gathers context from authentication, network, process, and file logs, extracting Indicators of Compromise (IOCs) including malicious IPs, file hashes, and compromised accounts. The Responder evaluates response options based on severity and business impact, executing graduated responses from monitoring enhancement for low-severity events to immediate IP blocking, account disablement, and emergency notifications for critical breaches.
+All security events are stored in a single Elasticsearch index (`security-simulated-events`) with a schema covering authentication, network, and process events. Python scripts handle data ingestion and attack simulation — generating realistic event sequences for brute force, exfiltration, and privilege escalation scenarios.
 
-Four Elastic Workflows automate the response: Immediate Containment blocks IPs and disables accounts; Slack Notification sends formatted alerts to the security team; Jira Ticket Creation generates detailed tickets with full investigation context; and Evidence Preservation creates forensic snapshots with 90-day retention and chain of custody.
+Each agent has carefully crafted instructions defining its role and decision boundaries. The Detector classifies incidents by severity (CRITICAL/HIGH/MEDIUM/LOW) based on statistical thresholds. The Investigator gathers context from authentication, network, and process events to extract indicators of compromise (IOCs). The Responder evaluates response options based on severity and coordinates through Kibana Connectors for Slack notifications and Jira ticket creation.
 
-## Impact and Metrics
+## What We Built With Agent Builder
 
-The system dramatically reduces incident response metrics: MTTD drops from 197 days to under 5 minutes; MTTR decreases from 24+ hours to under 60 seconds; and manual investigation time reduces by 90%. During testing, the system detected a simulated brute force attack in 47 seconds, completed investigation in 23 seconds, and executed full containment including Slack alert and Jira ticket creation in 12 seconds.
+- **3 custom agents** with specialized instructions and tool assignments
+- **5 ES|QL tools** for detection, correlation, and timeline analysis
+- **Kibana Connectors** for Slack and Jira integration on the Responder agent
+- **Python simulation framework** for generating realistic attack scenarios
+- **Interactive demo script** that walks through the full detection-to-response pipeline
 
 ## Features We Liked and Challenges
 
-**ES|QL JOINs** across indices proved incredibly powerful for correlating authentication logs with network activity and process execution, enabling comprehensive attack reconstruction. The **Agent Builder interface** made it surprisingly easy to define agent personas and assign tools, with clear visual feedback on agent capabilities.
+The **Agent Builder interface** made it easy to define agent personas, assign specific tools, and test agent behavior through the built-in chat. ES|QL's piped syntax was well-suited for security queries — aggregations over time windows with field-level filtering mapped directly to detection logic.
 
-Our main challenge was **tuning detection thresholds** to balance sensitivity and false positives. We addressed this by implementing baseline comparisons and severity-based response grading. **Workflow integration** required careful secret management, but Elastic's built-in secrets storage simplified this significantly.
-
-## Conclusion
-
-Incident Response Commander demonstrates how Elastic Agent Builder can transform security operations from reactive to proactive. By combining ES|QL's analytical power with multi-agent AI reasoning and automated workflows, we've built a system that doesn't just detect threats—it neutralizes them in real-time, giving security teams the speed they need to stay ahead of attackers.
+Our main challenge was getting ES|QL syntax right — functions like `COUNT_DISTINCT()` and backtick-escaping for nested fields like `` `event.category` `` required careful attention. We also had to work around the Elasticsearch Python client v9.x API changes (`document=` instead of `body=`, `query=` for ES|QL).
 
 ## Technologies Used
 
-- Elastic Agent Builder (Custom Agents, ES|QL Tools, Workflows)
-- Elasticsearch (Data storage, Search, ILM)
-- ES|QL (Complex correlations, Aggregations, Time-series analysis)
-- Slack Webhooks (Team notifications)
-- Jira REST API (Ticket management)
-- Python (Simulation and testing)
+- Elastic Agent Builder (Custom Agents, ES|QL Tools)
+- Elasticsearch 9.x (Data storage, ILM, Index Templates)
+- ES|QL (Aggregations, Time-series analysis, Filtering)
+- Kibana Connectors (Slack, Jira)
+- Python (Data ingestion, Attack simulation)
 
 ## Repository
 

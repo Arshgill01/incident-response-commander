@@ -7,17 +7,23 @@ Create a `.env` file in the root directory with:
 ```env
 # Elastic Cloud
 ELASTIC_CLOUD_ID=your-cloud-id
-ELASTIC_API_KEY=<YOUR_ELASTIC_API_KEY>
+ELASTIC_USERNAME=elastic
+ELASTIC_PASSWORD=your-password
+
+# Optional: API Key (if password auth doesn't work)
+# ELASTIC_API_KEY=your-api-key
+
+# Kibana URL (for reference)
 KIBANA_URL=your-kibana-url
 
 # Slack
 SLACK_WEBHOOK_URL=https://hooks.slack.com/services/YOUR/WEBHOOK/URL
-SLACK_CHANNEL=#security-incidents
 
 # Jira
 JIRA_URL=https://your-instance.atlassian.net
+JIRA_EMAIL=your-email@example.com
 JIRA_API_TOKEN=your-api-token
-JIRA_PROJECT_KEY=SEC
+JIRA_PROJECT_KEY=SCRUM
 ```
 
 ## Security Note
@@ -26,8 +32,10 @@ JIRA_PROJECT_KEY=SEC
 
 ## Getting Credentials
 
-### Elastic Cloud API Key
-Already provided: `<YOUR_ELASTIC_API_KEY>`
+### Elastic Cloud
+- **Cloud ID**: Elastic Cloud Console → Deployment → Cloud ID
+- **Password**: Elastic Cloud Console → Deployment → Security → Reset password
+- **API Key** (optional): Kibana → Stack Management → API Keys → Create
 
 ### Slack Webhook
 1. Go to https://api.slack.com/apps
@@ -50,4 +58,4 @@ Already provided: `<YOUR_ELASTIC_API_KEY>`
 - Elastic Cloud: Security solution view
 - Minimum: Storage optimized tier
 - Version: 9.x or later
-- Agent Builder: Enabled
+- Agent Builder: Enabled in Advanced Settings
