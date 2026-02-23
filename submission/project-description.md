@@ -1,44 +1,116 @@
 # Incident Response Commander
 
-**Multi-Agent Security Incident Response System**
+**Autonomous Multi-Agent Security Incident Response — Elastic Agent Builder Hackathon**
+
+---
 
 ## Problem Statement
 
-Security Operations Centers (SOCs) face an overwhelming challenge: they receive thousands of alerts daily but lack the resources to investigate each one thoroughly. Manual investigation and response create bottlenecks — analysts must context-switch between detection tools, investigation consoles, and communication platforms. This fragmented process slows response times and allows attackers to maintain persistence.
+Security Operations Centers (SOCs) are drowning in alerts. The median SOC receives thousands of alerts per day, yet the Mean Time to Respond (MTTR) for critical incidents is often measured in hours — not minutes. The bottleneck is human coordination: analysts must pivot between detection dashboards, investigation tools, and communication platforms, losing critical time at every handoff.
 
-## Solution Overview
+Existing tools give analysts *individual* capabilities. What they lack is an **autonomous pipeline** that chains detection → investigation → response with no manual handoffs.
 
-Incident Response Commander is a multi-agent AI system built on Elastic Agent Builder that streamlines the detect-investigate-respond workflow. The system uses three specialized agents working in a pipeline: a Detector agent that identifies attack patterns in security logs, an Investigator agent that correlates events and builds timelines, and a Responder agent that coordinates containment actions and notifies the team through Slack and Jira.
+---
+
+## Solution
+
+**Incident Response Commander** is a fully autonomous security incident response system built on Elastic's Agent Builder. It chains three specialized AI agents into a zero-human-intervention pipeline:
+
+1. **Detector Agent** — Runs ES|QL detection queries across 4 threat patterns, scores confidence, and classifies severity
+2. **Investigator Agent** — Performs deep forensic correlation, extracts IOCs, and reconstructs the attack timeline
+3. **Responder Agent** — Generates containment playbooks, dispatches Slack Block Kit alerts, and creates structured Jira tickets
+
+A Python **orchestrator** drives the full pipeline autonomously, enforces evidence gates between phases, writes a complete audit trail to Elasticsearch, and tracks MTTD/MTTR metrics against industry benchmarks.
+
+---
 
 ## Technical Implementation
 
-The system is built around five custom ES|QL tools created in Elastic Agent Builder. Brute Force Detection identifies clusters of failed authentication attempts from single IP addresses using time-windowed aggregations. Data Exfiltration Detection monitors outbound data transfer volumes grouped by user. Privilege Escalation Detection tracks suspicious elevation attempts by process category. Incident Correlation queries all events related to a suspicious IP or user across a configurable investigation window. Timeline Builder creates chronological views of activity using time bucketing.
+### Orchestrator (the centerpiece)
 
-All security events are stored in a single Elasticsearch index (`security-simulated-events`) with a schema covering authentication, network, and process events. Python scripts handle data ingestion and attack simulation — generating realistic event sequences for brute force, exfiltration, and privilege escalation scenarios.
+`demo/orchestrator.py` is a ~600-line Python engine that:
 
-Each agent has carefully crafted instructions defining its role and decision boundaries. The Detector classifies incidents by severity (CRITICAL/HIGH/MEDIUM/LOW) based on statistical thresholds. The Investigator gathers context from authentication, network, and process events to extract indicators of compromise (IOCs). The Responder evaluates response options based on severity and coordinates through Kibana Connectors for Slack notifications and Jira ticket creation.
+- Runs 4 ES|QL detection queries directly via the Elasticsearch Python client (v9.x)
+- Calls the Kibana `unified_completion` connector API to invoke Claude Sonnet with agent-specific system prompts
+- Enforces **evidence gates**: phase transitions require minimum confidence score + valid IOC list + timeline presence
+- Writes every phase result to `incident-response-log` (full audit trail)
+- Writes MTTD/MTTR to `incident-metrics` for dashboard tracking
+- Supports `--dry-run`, `--watch`, `--report`, and `--simulate` CLI modes
+
+### ES|QL Tool Library (10 tools)
+
+| Tool | Purpose |
+|---|---|
+| `brute-force-detection` | Auth failures ≥5 in 15 min → breach confirmed |
+| `data-exfiltration-detection` | Outbound bytes > 100 MB in 1 hour |
+| `privilege-escalation-detection` | Process privilege_escalation action in 30 min |
+| `incident-correlation` | All events by source IP in investigation window |
+| `timeline-builder` | Chronological event sequence with time buckets |
+| `anomaly-scorer` | Recent vs. 7-day baseline ratio per source IP |
+| `mitre-attack-mapper` | Maps event patterns → T-codes (6 techniques) |
+| `lateral-movement-detector` | 3+ distinct host logins from same IP in 30 min |
+| `campaign-correlation` | 2+ attack types from same IP = coordinated actor |
+| `mttd-mttr-scorecard` | 30-day P50/P95 stats with industry grade labels |
+
+### Attack Simulation (5 scenarios)
+
+`demo/incident-simulator.py` generates ECS-compliant synthetic events:
+
+- **Brute Force** — 20-30 failures + successful breach
+- **Data Exfiltration** — 5-10 transfers of 500 MB–1.5 GB each
+- **Privilege Escalation** — 5 sudo/pkexec commands targeting root
+- **Lateral Movement** — Same user, 5 distinct internal hosts (T1021)
+- **APT Kill-Chain** — 6 stages over 120 minutes: Recon → Initial Access → Persistence → Privilege Escalation → Lateral Movement → Exfiltration (T1046 → T1110 → T1136 → T1068 → T1021 → T1041)
+
+### Notification Pipeline
+
+`demo/notifications.py` dispatches:
+- **Slack Block Kit** — Severity-colour-coded, with emoji-labelled automated vs. human-approval action lists, MITRE technique badges, and MTTD/MTTR metrics
+- **Jira REST API** — Structured Jira-wiki-markup tickets with timeline table, IOC section, impact assessment, and response checklist
+
+### Testing (60+ tests)
+
+`tests/` covers:
+- Event generation correctness and ECS compliance
+- ES|QL file existence, syntax (no legacy `COUNT_DISTINCT()`), index names, content accuracy
+- Notification channel enable/disable, block structure, HTTP success/failure handling
+- Orchestrator evidence gate logic, audit log writes, LLM call mocking
+- All 5 attack type routing paths in `run_simulation()`
+
+---
 
 ## What We Built With Agent Builder
 
-- **3 custom agents** with specialized instructions and tool assignments
-- **5 ES|QL tools** for detection, correlation, and timeline analysis
-- **Kibana Connectors** for Slack and Jira integration on the Responder agent
-- **Python simulation framework** for generating realistic attack scenarios
-- **Interactive demo script** that walks through the full detection-to-response pipeline
+- **3 custom agents** — each with full instructions, severity decision trees, and response playbooks
+- **10 ES|QL tools** — all registered in Agent Builder and runnable from chat
+- **Autonomous orchestrator** — no human clicks required from simulation to Jira ticket
+- **MITRE ATT&CK coverage** — 6 techniques across 5 attack scenarios
+- **Industry-grade metrics** — MTTD/MTTR tracked and graded (Excellent / Good / Fair / Poor)
 
-## Features We Liked and Challenges
+---
 
-The **Agent Builder interface** made it easy to define agent personas, assign specific tools, and test agent behavior through the built-in chat. ES|QL's piped syntax was well-suited for security queries — aggregations over time windows with field-level filtering mapped directly to detection logic.
+## Key Technical Discoveries
 
-Our main challenge was getting ES|QL syntax right — functions like `COUNT_DISTINCT()` and backtick-escaping for nested fields like `` `event.category` `` required careful attention. We also had to work around the Elasticsearch Python client v9.x API changes (`document=` instead of `body=`, `query=` for ES|QL).
+1. **No direct agent invocation API** — Agent Builder chat is UI-only. The orchestrator calls the `unified_completion` Kibana connector directly and injects agent system prompts, achieving the same result without UI.
+2. **ES|QL v9 syntax** — `COUNT(DISTINCT x)` not `COUNT_DISTINCT(x)`. Nested fields require backtick escaping (`` `event.category` ``).
+3. **ES Python client v9** — `document=` not `body=`; `query=` for ES|QL; `request_timeout=` not `timeout=`.
+4. **Auth** — API key was broken on our deployment. Username/password fallback works reliably.
+5. **Security AI Assistant** (`/api/security_ai_assistant/chat/complete`) — Works for pure LLM calls but does not invoke custom ES|QL tools, so native ES|QL in Python was the right choice.
 
-## Technologies Used
+---
 
-- Elastic Agent Builder (Custom Agents, ES|QL Tools)
-- Elasticsearch 9.x (Data storage, ILM, Index Templates)
-- ES|QL (Aggregations, Time-series analysis, Filtering)
-- Kibana Connectors (Slack, Jira)
-- Python (Data ingestion, Attack simulation)
+## Technologies
+
+- **Elastic Agent Builder** — Custom agents, ES|QL tools
+- **Elasticsearch 9.x** — Event storage, ILM, index templates, ES|QL engine
+- **Kibana** — Connector API (`unified_completion`), Agent Builder UI
+- **Anthropic Claude Sonnet** — LLM backbone via Kibana connector
+- **Python 3.9+** — Orchestrator, simulator, notifications, tests
+- **Slack Block Kit** — Rich incident alert formatting
+- **Jira REST API v3** — Structured ticket creation
+- **pytest** — 60+ unit tests
+
+---
 
 ## Repository
 

@@ -1,0 +1,54 @@
+// mttd-mttr-scorecard.esql
+// Reads from the incident-metrics index to produce a MTTD/MTTR scorecard.
+// Covers the last 30 days of resolved incidents.
+//
+// incident-metrics documents contain:
+//   incident_id, incident_type, severity,
+//   detected_at, responded_at, resolved_at,
+//   mttd_minutes, mttr_minutes, source_ip,
+//   affected_hosts_count, automated_actions_count
+
+FROM incident-metrics
+| WHERE @timestamp >= NOW() - 30 DAYS
+
+// ── Overall averages ──────────────────────────────────────────────────────────
+| STATS
+    total_incidents      = COUNT(*),
+    avg_mttd_minutes     = ROUND(AVG(mttd_minutes), 1),
+    avg_mttr_minutes     = ROUND(AVG(mttr_minutes), 1),
+    median_mttd          = ROUND(PERCENTILE(mttd_minutes, 50), 1),
+    median_mttr          = ROUND(PERCENTILE(mttr_minutes, 50), 1),
+    p95_mttd             = ROUND(PERCENTILE(mttd_minutes, 95), 1),
+    p95_mttr             = ROUND(PERCENTILE(mttr_minutes, 95), 1),
+    max_mttd             = ROUND(MAX(mttd_minutes), 1),
+    max_mttr             = ROUND(MAX(mttr_minutes), 1),
+    critical_count       = COUNT(CASE(severity == "CRITICAL", 1)),
+    high_count           = COUNT(CASE(severity == "HIGH", 1)),
+    automated_pct        = ROUND(
+                              100.0 * SUM(CASE(automated_actions_count > 0, 1, 0))
+                              / COUNT(*),
+                              1
+                           )
+
+// Scorecard grading: industry benchmarks
+// MTTD < 5 min = Excellent, < 15 min = Good, < 60 min = Fair, else Poor
+// MTTR < 15 min = Excellent, < 30 min = Good, < 120 min = Fair, else Poor
+| EVAL
+    mttd_grade = CASE(
+        avg_mttd_minutes <  5,  "Excellent (< 5 min)",
+        avg_mttd_minutes < 15,  "Good (< 15 min)",
+        avg_mttd_minutes < 60,  "Fair (< 60 min)",
+        "Poor (> 60 min)"
+    ),
+    mttr_grade = CASE(
+        avg_mttr_minutes <  15, "Excellent (< 15 min)",
+        avg_mttr_minutes <  30, "Good (< 30 min)",
+        avg_mttr_minutes < 120, "Fair (< 2 hr)",
+        "Poor (> 2 hr)"
+    )
+
+| KEEP
+    total_incidents,
+    avg_mttd_minutes, median_mttd, p95_mttd, max_mttd, mttd_grade,
+    avg_mttr_minutes, median_mttr, p95_mttr, max_mttr, mttr_grade,
+    critical_count, high_count, automated_pct

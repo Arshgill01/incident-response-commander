@@ -1,0 +1,33 @@
+// lateral-movement-detector.esql
+// Detects lateral movement: a single source IP or user authenticating
+// successfully to 3 or more distinct internal hosts within 30 minutes.
+//
+// MITRE ATT&CK: T1021 — Remote Services
+// Threshold: 3+ distinct destination hosts within 30 minutes
+
+FROM security-simulated-events
+| WHERE @timestamp >= NOW() - 30 MINUTES
+
+// Focus on successful authentication events only
+| WHERE `event.category` == "authentication"
+  AND `event.action`   IN ("login", "admin_login")
+  AND `event.outcome`  == "success"
+
+// Count distinct hosts accessed per source IP + user combination
+| STATS
+    distinct_hosts   = COUNT(DISTINCT `host.name`),
+    total_logins     = COUNT(*),
+    first_seen       = MIN(@timestamp),
+    last_seen        = MAX(@timestamp)
+  BY `source.ip`, `user.name`
+
+// Lateral movement threshold: 3+ distinct hosts
+| WHERE distinct_hosts >= 3
+
+// Calculate spread window in minutes
+| EVAL spread_minutes = DATE_DIFF("minute", first_seen, last_seen)
+
+| SORT distinct_hosts DESC, total_logins DESC
+| KEEP `source.ip`, `user.name`, distinct_hosts, total_logins,
+       first_seen, last_seen, spread_minutes
+| LIMIT 20

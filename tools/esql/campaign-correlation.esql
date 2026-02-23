@@ -1,0 +1,87 @@
+// campaign-correlation.esql
+// Correlates multiple attack types originating from the same source IP
+// within a 2-hour window. A source IP hitting 2+ distinct attack categories
+// is flagged as a potential coordinated campaign or APT actor.
+//
+// Attack categories detected:
+//   brute_force          — auth failures >= 5
+//   exfiltration         — large outbound bytes (>100MB)
+//   privilege_escalation — process privilege_escalation action
+//   lateral_movement     — successful logins to 3+ distinct hosts
+//   reconnaissance       — many failed inbound connections to distinct ports
+
+FROM security-simulated-events
+| WHERE @timestamp >= NOW() - 2 HOURS
+
+// ── Signal flags ─────────────────────────────────────────────────────────────
+| EVAL sig_brute = CASE(
+    `event.category` == "authentication" AND `event.outcome` == "failure",
+    1, 0
+  )
+| EVAL sig_exfil = CASE(
+    `event.category` == "network"
+    AND `network.direction` == "outbound"
+    AND `network.bytes` > 100000000,
+    1, 0
+  )
+| EVAL sig_privesc = CASE(
+    `event.category` == "process"
+    AND `event.action` == "privilege_escalation",
+    1, 0
+  )
+| EVAL sig_lateral = CASE(
+    `event.category` == "authentication"
+    AND `event.action` IN ("login", "admin_login")
+    AND `event.outcome` == "success",
+    1, 0
+  )
+| EVAL sig_recon = CASE(
+    `event.category` == "network"
+    AND `event.outcome` == "failure"
+    AND `network.bytes` <= 1024,
+    1, 0
+  )
+
+// ── Aggregate per source IP ───────────────────────────────────────────────────
+| STATS
+    brute_count    = SUM(sig_brute),
+    exfil_count    = SUM(sig_exfil),
+    privesc_count  = SUM(sig_privesc),
+    lateral_logins = SUM(sig_lateral),
+    lateral_hosts  = COUNT(DISTINCT `host.name`),
+    recon_count    = SUM(sig_recon),
+    total_events   = COUNT(*),
+    distinct_users = COUNT(DISTINCT `user.name`),
+    first_seen     = MIN(@timestamp),
+    last_seen      = MAX(@timestamp)
+  BY `source.ip`
+
+// ── Apply per-category thresholds to get binary hit flags ────────────────────
+| EVAL
+    hit_brute    = CASE(brute_count    >= 5,  1, 0),
+    hit_exfil    = CASE(exfil_count    >= 1,  1, 0),
+    hit_privesc  = CASE(privesc_count  >= 1,  1, 0),
+    hit_lateral  = CASE(lateral_hosts  >= 3,  1, 0),
+    hit_recon    = CASE(recon_count    >= 5,  1, 0)
+
+| EVAL attack_types_count = hit_brute + hit_exfil + hit_privesc + hit_lateral + hit_recon
+
+// Campaign threshold: 2+ distinct attack types from same source
+| WHERE attack_types_count >= 2
+
+// Campaign duration
+| EVAL campaign_duration_minutes = DATE_DIFF("minute", first_seen, last_seen)
+
+// Severity scoring: 5 types = APT, 3-4 = High, 2 = Medium
+| EVAL campaign_severity = CASE(
+    attack_types_count >= 5, "APT_CRITICAL",
+    attack_types_count >= 3, "HIGH",
+    "MEDIUM"
+  )
+
+| SORT attack_types_count DESC, total_events DESC
+| KEEP `source.ip`, campaign_severity, attack_types_count,
+       hit_brute, hit_exfil, hit_privesc, hit_lateral, hit_recon,
+       distinct_users, total_events, campaign_duration_minutes,
+       first_seen, last_seen
+| LIMIT 20

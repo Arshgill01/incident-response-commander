@@ -1,159 +1,159 @@
-#!/bin/bash
+#!/usr/bin/env bash
+# ============================================================
+# run-demo.sh — Incident Response Commander full end-to-end demo
+# Usage: bash demo/run-demo.sh [--type <attack_type>] [--no-watch] [--dry-run]
+#
+# Attack types: brute_force | exfiltration | privilege_escalation
+#               lateral_movement | apt_attack  (default: apt_attack)
+# ============================================================
+set -euo pipefail
 
-# Incident Response Commander - Demo Script
-# This script runs through a complete demo of the system
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ROOT_DIR="$(dirname "$SCRIPT_DIR")"
+DEMO_DIR="$SCRIPT_DIR"
 
-echo "=================================="
-echo "INCIDENT RESPONSE COMMANDER DEMO"
-echo "=================================="
-echo ""
+# ── Colours ──────────────────────────────────────────────────
+RED='\033[0;31m';  YELLOW='\033[1;33m'; GREEN='\033[0;32m'
+CYAN='\033[0;36m'; BOLD='\033[1m';      RESET='\033[0m'
 
-# Check if we're in the right directory
-if [ ! -f "demo/incident-simulator.py" ]; then
-    echo "❌ Error: Please run this script from the project root"
-    exit 1
+info()    { echo -e "${CYAN}[demo]${RESET} $*"; }
+success() { echo -e "${GREEN}[demo]${RESET} $*"; }
+warn()    { echo -e "${YELLOW}[warn]${RESET} $*"; }
+error()   { echo -e "${RED}[error]${RESET} $*" >&2; }
+banner()  { echo -e "\n${BOLD}${CYAN}$*${RESET}\n"; }
+
+# ── Defaults ──────────────────────────────────────────────────
+ATTACK_TYPE="apt_attack"
+DRY_RUN=false
+SKIP_SETUP=false
+
+# ── Argument parsing ──────────────────────────────────────────
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --type)       ATTACK_TYPE="$2"; shift 2 ;;
+    --dry-run)    DRY_RUN=true;     shift ;;
+    --skip-setup) SKIP_SETUP=true;  shift ;;
+    -h|--help)
+      echo "Usage: $0 [--type <attack_type>] [--dry-run] [--skip-setup]"
+      echo ""
+      echo "Attack types:"
+      echo "  brute_force          Classic credential stuffing attack"
+      echo "  exfiltration         Large outbound data transfer"
+      echo "  privilege_escalation Sudo / root escalation"
+      echo "  lateral_movement     Multi-host SSH pivot (T1021)"
+      echo "  apt_attack           Full 6-stage APT kill-chain (default)"
+      exit 0
+      ;;
+    *) error "Unknown argument: $1"; exit 1 ;;
+  esac
+done
+
+# ── Validate attack type ──────────────────────────────────────
+VALID_TYPES=("brute_force" "exfiltration" "privilege_escalation" "lateral_movement" "apt_attack")
+VALID=false
+for t in "${VALID_TYPES[@]}"; do [[ "$t" == "$ATTACK_TYPE" ]] && VALID=true; done
+if [[ "$VALID" == "false" ]]; then
+  error "Invalid attack type: '$ATTACK_TYPE'"
+  echo "Valid types: ${VALID_TYPES[*]}"
+  exit 1
 fi
 
-# Check Python environment
-if ! command -v python3 &> /dev/null; then
-    echo "❌ Error: Python 3 not found"
-    exit 1
+# ── Pre-flight: .env ──────────────────────────────────────────
+if [[ ! -f "$ROOT_DIR/.env" ]]; then
+  error ".env file not found at $ROOT_DIR/.env"
+  echo "Copy .env.example → .env and fill in your credentials."
+  exit 1
+fi
+# shellcheck disable=SC1090
+source "$ROOT_DIR/.env"
+
+if [[ -z "${ELASTIC_CLOUD_ID:-}" ]]; then
+  error "ELASTIC_CLOUD_ID not set in .env"
+  exit 1
 fi
 
-echo "✅ Environment check passed"
-echo ""
+# ── Pre-flight: Python ────────────────────────────────────────
+if ! command -v python3 &>/dev/null; then
+  error "python3 not found. Install Python 3.9+."
+  exit 1
+fi
 
-# Function to print section headers
-print_section() {
-    echo ""
-    echo "=================================="
-    echo "$1"
-    echo "=================================="
-    echo ""
+PYTHON_VERSION=$(python3 -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')")
+if python3 -c "import sys; sys.exit(0 if sys.version_info >= (3,9) else 1)" 2>/dev/null; then
+  success "Python $PYTHON_VERSION OK"
+else
+  error "Python 3.9+ required (found $PYTHON_VERSION)"
+  exit 1
+fi
+
+# ── Pre-flight: dependencies ──────────────────────────────────
+info "Checking Python dependencies..."
+python3 -c "import elasticsearch, dotenv, requests" 2>/dev/null || {
+  warn "Some dependencies missing. Installing..."
+  pip3 install -q -r "$ROOT_DIR/requirements.txt"
 }
 
-# Function to wait for user
-wait_for_user() {
-    echo ""
-    read -p "Press Enter to continue..."
-    echo ""
-}
+# ── HEADER ────────────────────────────────────────────────────
+clear
+echo -e "${BOLD}${CYAN}"
+cat <<'EOF'
+  ___            _     _         _     ___
+ |_ _|_ __   ___(_) __| | ___ _ | |_  | _ \ ___ ___ _ __   ___  _ _  ___ ___
+  | || '_ \ / __| |/ _` |/ _ \ || __|  |   // -_|_-<| '_ \ / _ \| ' \(_-</ -_)
+ |___|_| |_|\___| |\__,_|\___/ \__|   |_|_\\___/__/_| .__/ \___/|_||_/__/\___|
+           |__/                               |_|
+            C O M M A N D E R
+EOF
+echo -e "${RESET}"
+echo -e "${BOLD}Elastic Agent Builder Hackathon — Autonomous Incident Response${RESET}"
+echo "Attack simulation: ${BOLD}${ATTACK_TYPE}${RESET}"
+echo "Dry run:           ${DRY_RUN}"
+echo ""
+echo "──────────────────────────────────────────────────────────"
 
-print_section "PHASE 1: Setup Verification"
-echo "Checking Elastic Cloud connection..."
-python3 -c "
-from elasticsearch import Elasticsearch
-import os
-from dotenv import load_dotenv
-load_dotenv()
-cloud_id = os.getenv('ELASTIC_CLOUD_ID')
-api_key = os.getenv('ELASTIC_API_KEY')
-username = os.getenv('ELASTIC_USERNAME', 'elastic')
-password = os.getenv('ELASTIC_PASSWORD')
-es = None
-if api_key and api_key.strip():
-    try:
-        es = Elasticsearch(cloud_id=cloud_id, api_key=api_key, request_timeout=30)
-        es.info()
-    except Exception:
-        es = None
-if es is None and password and password.strip():
-    es = Elasticsearch(cloud_id=cloud_id, basic_auth=(username, password), request_timeout=30)
-if es is None:
-    raise SystemExit('No valid credentials found in .env')
-print('✅ Connected to Elasticsearch:', es.info()['version']['number'])
-"
-
-if [ $? -ne 0 ]; then
-    echo "❌ Failed to connect to Elastic Cloud"
-    echo "Please check your .env file configuration"
-    exit 1
+# ── STEP 1: Setup indices ─────────────────────────────────────
+if [[ "$SKIP_SETUP" == "false" ]]; then
+  banner "STEP 1/4 — Setting up Elasticsearch indices"
+  python3 "$DEMO_DIR/setup-indices.py" --verify || {
+    info "Indices not found or need creation. Running setup..."
+    python3 "$DEMO_DIR/setup-indices.py"
+  }
+  success "Indices ready."
+else
+  info "Skipping index setup (--skip-setup)"
 fi
 
-wait_for_user
+# ── STEP 2: Simulate attack ───────────────────────────────────
+banner "STEP 2/4 — Simulating ${ATTACK_TYPE} attack"
+if [[ "$DRY_RUN" == "true" ]]; then
+  warn "[DRY RUN] Skipping event injection."
+else
+  python3 "$DEMO_DIR/incident-simulator.py" "$ATTACK_TYPE"
+  success "Attack events injected into Elasticsearch."
+fi
 
-print_section "PHASE 2: Ingest Sample Data"
-echo "Setting up data ingestion..."
-cd demo
-python3 data-ingestion.py
-cd ..
+# ── STEP 3: Run orchestrator ──────────────────────────────────
+banner "STEP 3/4 — Orchestrator: Detection → Investigation → Response"
 
-wait_for_user
+ORCH_FLAGS=""
+[[ "$DRY_RUN" == "true" ]] && ORCH_FLAGS="--dry-run"
 
-print_section "PHASE 3: Simulate Brute Force Attack"
-echo "Injecting brute force attack events into logs..."
-cd demo
-python3 incident-simulator.py brute_force
-cd ..
+python3 "$DEMO_DIR/orchestrator.py" $ORCH_FLAGS
+
+# ── STEP 4: Print scorecard ───────────────────────────────────
+banner "STEP 4/4 — MTTD / MTTR Scorecard"
+python3 "$DEMO_DIR/orchestrator.py" --report
 
 echo ""
-echo "📊 Attack injected successfully!"
-echo "   - Source IP: 192.168.1.100"
-echo "   - Target User: admin"
-echo "   - Failed Attempts: 20-30"
-echo "   - Successful Breach: Yes"
-
-wait_for_user
-
-print_section "PHASE 4: Detection"
-echo "Now check the Detector Agent in Kibana:"
+echo "══════════════════════════════════════════════════════════"
+success "Demo complete!"
 echo ""
-echo "1. Go to Agent Builder → Chat"
-echo "2. Select 'Security Incident Detector' agent"
-echo "3. Ask: 'Detect any brute force attacks in the last 15 minutes'"
+echo "What just happened:"
+echo "  1. Index setup confirmed  ✅"
+echo "  2. ${ATTACK_TYPE} events injected  ✅"
+echo "  3. Orchestrator ran full 3-phase pipeline  ✅"
+echo "     Detection → Investigation → Response (autonomous)"
+echo "  4. MTTD/MTTR scorecard printed  ✅"
 echo ""
-echo "Expected: Agent should identify the attack pattern"
-
-wait_for_user
-
-print_section "PHASE 5: Investigation"
-echo "Escalate to Investigator Agent:"
-echo ""
-echo "1. Select 'Incident Investigator' agent"
-echo "2. Provide the suspicious IP from detection"
-echo "3. Ask: 'Investigate this IP and build a timeline'"
-echo ""
-echo "Expected: Agent correlates events and builds timeline"
-
-wait_for_user
-
-print_section "PHASE 6: Response"
-echo "Execute automated response:"
-echo ""
-echo "1. Select 'Incident Responder' agent"
-echo "2. Provide investigation report"
-echo "3. Ask: 'Execute response for this CRITICAL incident'"
-echo ""
-echo "Expected: Automated actions execute"
-echo "   - Check Slack for notification"
-echo "   - Check Jira for ticket"
-echo "   - Evidence preserved in logs"
-
-wait_for_user
-
-print_section "PHASE 7: Additional Simulations"
-echo "Test other incident types:"
-echo ""
-echo "Option 1: Data Exfiltration"
-echo "   cd demo && python3 incident-simulator.py exfiltration"
-echo ""
-echo "Option 2: Privilege Escalation"
-echo "   cd demo && python3 incident-simulator.py privilege_escalation"
-
-wait_for_user
-
-print_section "DEMO COMPLETE"
-echo ""
-echo "Summary:"
-echo "✅ Brute force attack detected"
-echo "✅ Investigation completed"
-echo "✅ Response actions executed"
-echo "✅ Team notified via Slack"
-echo "✅ Jira ticket created"
-echo "✅ Evidence preserved"
-echo ""
-echo "Total Response Time: ~60 seconds"
-echo ""
-echo "Thank you for viewing our demo!"
-echo ""
-echo "Repository: https://github.com/arshgill01/incident-response-commander"
+echo "Next: Open Kibana → Agent Builder to see the agents."
+echo "══════════════════════════════════════════════════════════"

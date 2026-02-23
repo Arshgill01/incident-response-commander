@@ -87,6 +87,75 @@ Description: Build chronological timeline of suspicious activity
 
 ---
 
+**IMPORTANT:** Use `COUNT(DISTINCT x)` — NOT `COUNT_DISTINCT()`. The latter is deprecated in ES|QL 9.x and will cause query errors.
+
+---
+
+### Tool 6: Lateral Movement Detector
+```
+Name: lateral-movement-detector
+Type: ES|QL
+Description: Detect lateral movement — same source IP or user authenticating to 3+ distinct hosts within 30 minutes (T1021)
+```
+
+**Copy ES|QL Query from:** `tools/esql/lateral-movement-detector.esql`
+
+No parameters required (hardcoded 30-minute window and 3-host threshold).
+
+---
+
+### Tool 7: Anomaly Scorer
+```
+Name: anomaly-scorer
+Type: ES|QL
+Description: Compare last 15 minutes of activity to 7-day baseline per source IP and return a normalized anomaly score (0.0–1.0)
+```
+
+**Copy ES|QL Query from:** `tools/esql/anomaly-scorer.esql`
+
+No parameters required.
+
+---
+
+### Tool 8: MITRE ATT&CK Mapper
+```
+Name: mitre-attack-mapper
+Type: ES|QL
+Description: Map observed event patterns to MITRE ATT&CK techniques (T1110, T1041, T1068, T1021, T1136, T1046) per source IP
+```
+
+**Copy ES|QL Query from:** `tools/esql/mitre-attack-mapper.esql`
+
+No parameters required.
+
+---
+
+### Tool 9: Campaign Correlation
+```
+Name: campaign-correlation
+Type: ES|QL
+Description: Flag source IPs hitting 2+ distinct attack categories within 2 hours as coordinated actors or APT campaigns
+```
+
+**Copy ES|QL Query from:** `tools/esql/campaign-correlation.esql`
+
+No parameters required.
+
+---
+
+### Tool 10: MTTD/MTTR Scorecard
+```
+Name: mttd-mttr-scorecard
+Type: ES|QL
+Description: Read 30-day incident metrics and produce P50/P95 MTTD and MTTR statistics with industry benchmark grades
+```
+
+**Copy ES|QL Query from:** `tools/esql/mttd-mttr-scorecard.esql`
+
+No parameters required. Reads from `incident-metrics` index.
+
+---
+
 ## Step 2: Create Custom Agents (3 Agents)
 
 Navigate to: **Agent Builder → Agents → New Agent**
@@ -106,6 +175,10 @@ Avatar: Red shield
 - brute-force-detection
 - data-exfiltration-detection
 - privilege-escalation-detection
+- lateral-movement-detector
+- anomaly-scorer
+- mitre-attack-mapper
+- campaign-correlation
 - platform.core.search
 - platform.core.list_indices
 
@@ -125,6 +198,7 @@ Avatar: Orange search
 **Tools Tab - Select these tools:**
 - incident-correlation
 - timeline-builder
+- mttd-mttr-scorecard
 - platform.core.search
 - platform.core.get_document_by_id
 - platform.core.get_index_mapping
@@ -143,7 +217,14 @@ Avatar: Green bolt
 **Instructions:** Copy from `agents/responder-agent.json`
 
 **Tools Tab:**
-Assign Slack and Jira connector tools after creating them in Step 3.
+Assign these tools:
+- incident-correlation
+- timeline-builder
+- platform.core.search
+- platform.core.get_document_by_id
+- platform.core.get_index_mapping
+
+**Note:** Slack and Jira notifications are handled directly by `demo/notifications.py` via REST API — no Kibana Connectors are required for the Responder agent.
 
 ---
 
@@ -182,7 +263,14 @@ python3 data-ingestion.py
 ### 4.2 Simulate an Attack
 
 ```bash
+# Brute force (classic)
 python3 incident-simulator.py brute_force
+
+# Lateral movement
+python3 incident-simulator.py lateral_movement
+
+# Full APT kill-chain (6 stages)
+python3 incident-simulator.py apt_attack
 ```
 
 ### 4.3 Test Detection
@@ -192,19 +280,32 @@ python3 incident-simulator.py brute_force
 3. Type: "Detect brute force attacks in the last 15 minutes"
 4. Verify it finds the simulated attack
 
-### 4.4 Test Investigation
+### 4.4 Run the autonomous orchestrator
+
+```bash
+# Full autonomous pipeline (no human clicks)
+python3 orchestrator.py
+
+# Dry run (no ES writes)
+python3 orchestrator.py --dry-run
+
+# MTTD/MTTR scorecard
+python3 orchestrator.py --report
+```
+
+### 4.5 Test Individual Agents (manual chat)
 
 1. Switch to **"Incident Investigator"**
 2. Provide the suspicious IP from detection
 3. Type: "Investigate IP [IP_ADDRESS] and build timeline"
 4. Verify it correlates events
 
-### 4.5 Test Response
+### 4.6 Test Response (via orchestrator)
 
-1. Switch to **"Incident Responder"**
-2. Type: "Execute response for this CRITICAL incident"
-3. Check Slack for notification
-4. Check Jira for ticket
+The orchestrator dispatches Slack + Jira automatically. To test manually:
+```bash
+python3 demo/notifications.py   # Runs the self-test in __main__
+```
 
 ---
 
@@ -279,8 +380,8 @@ git push -u origin master
 ### Tools not working?
 - Verify ES|QL syntax in Dev Tools first
 - Check that `security-simulated-events` index exists
-- Ensure nested fields use backticks
-- Use `COUNT_DISTINCT()` not `COUNT(DISTINCT ...)`
+- Ensure nested fields use backticks (`` `event.category` ``)
+- Use `COUNT(DISTINCT x)` — NOT `COUNT_DISTINCT()` (deprecated in 9.x)
 
 ### Connectors not working?
 - Check connector configuration in Stack Management
@@ -299,14 +400,15 @@ git push -u origin master
 
 After completing all steps, you should have:
 
-- [ ] 5 custom ES|QL tools created in Agent Builder
+- [ ] 10 custom ES|QL tools created in Agent Builder
 - [ ] 3 custom agents configured in Agent Builder
-- [ ] Slack and Jira connectors set up
+- [ ] `.env` configured with Elastic + Slack + Jira credentials
 - [ ] Sample data ingested into `security-simulated-events`
-- [ ] Successfully tested detection with simulated attack
+- [ ] Indices created: `incident-response-log`, `incident-metrics`
+- [ ] Orchestrator runs end-to-end without human intervention
 - [ ] GitHub repository pushed
 - [ ] Devpost submission complete
 
 ---
 
-Estimated time to complete manual setup: **1-2 hours**
+Estimated time to complete manual setup: **45–90 minutes**

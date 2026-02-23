@@ -1,0 +1,53 @@
+// anomaly-scorer.esql
+// Compares recent activity (last 15 min) to a 7-day baseline per source IP.
+// Returns a normalized anomaly score (0.0 – 1.0) — higher = more anomalous.
+//
+// Usage in Kibana Agent Builder: call with no parameters.
+// The agent interprets scores >= 0.5 as suspicious, >= 0.75 as high-confidence.
+
+FROM security-simulated-events
+| WHERE @timestamp >= NOW() - 7 DAYS
+
+// Bucket every event into either the recent window or the baseline window
+| EVAL window = CASE(
+    @timestamp >= NOW() - 15 MINUTES, "recent",
+    "baseline"
+  )
+
+// Count events per source IP per window
+| STATS
+    event_count = COUNT(*),
+    unique_actions = COUNT(DISTINCT `event.action`),
+    unique_hosts   = COUNT(DISTINCT `host.name`)
+  BY `source.ip`, window
+
+// Pivot: separate recent vs baseline counts side-by-side
+| EVAL
+    recent_count   = CASE(window == "recent",   event_count, 0),
+    baseline_count = CASE(window == "baseline",  event_count, 0)
+
+| STATS
+    total_recent   = SUM(recent_count),
+    total_baseline = SUM(baseline_count),
+    max_actions    = MAX(unique_actions),
+    max_hosts      = MAX(unique_hosts)
+  BY `source.ip`
+
+// Normalize baseline to a 15-minute equivalent (baseline covers 7 days = 10080 minutes)
+| EVAL
+    baseline_per_15m = total_baseline / 672.0,
+    ratio = CASE(
+        baseline_per_15m > 0,
+        total_recent / baseline_per_15m,
+        CASE(total_recent > 0, 10.0, 0.0)
+    )
+
+// Clamp ratio to 0–10, then normalize to 0–1
+| EVAL
+    clamped_ratio  = CASE(ratio > 10.0, 10.0, ratio),
+    anomaly_score  = ROUND(clamped_ratio / 10.0, 3)
+
+| WHERE anomaly_score >= 0.3
+| SORT  anomaly_score DESC
+| KEEP  `source.ip`, total_recent, baseline_per_15m, anomaly_score, max_hosts
+| LIMIT 20

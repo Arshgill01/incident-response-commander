@@ -78,12 +78,34 @@ Incident Response Commander is a multi-agent AI system built on Elastic Agent Bu
             └───────────┘                   └───────────┘
 ```
 
+## Orchestrator Layer (Autonomous Pipeline Engine)
+
+`demo/orchestrator.py` is the centerpiece of the autonomous pipeline. It runs entirely without human interaction:
+
+1. **Detection phase** — Executes 4 ES|QL queries (brute force, exfiltration, privilege escalation, lateral movement) directly via the Elasticsearch Python client. If any query returns results above threshold, it calls the LLM via the Kibana `unified_completion` connector API with the Detector agent's system prompt injected.
+
+2. **Evidence gate** — Before proceeding to investigation, validates: confidence ≥ 0.5 AND at least one IOC present.
+
+3. **Investigation phase** — Calls the LLM with the Investigator agent's system prompt and the raw detection results as context. Runs `incident-correlation` and `timeline-builder` ES|QL queries and attaches results.
+
+4. **Evidence gate** — Before proceeding to response, validates: confidence ≥ 0.5 AND non-empty timeline.
+
+5. **Response phase** — Calls the LLM with the Responder agent's system prompt. Dispatches Slack Block Kit alert and Jira ticket via `demo/notifications.py`. Writes MTTD/MTTR to `incident-metrics`.
+
+6. **Audit trail** — Every phase result is written to `incident-response-log`.
+
+**CLI flags:** `--dry-run` (skip ES/LLM calls), `--watch` (continuous polling), `--report` (print MTTD/MTTR scorecard), `--simulate` (inject synthetic events first).
+
+---
+
 ## Component Details
 
 ### 1. Data Layer
 
-**Index:**
+**Indices:**
 - `security-simulated-events` — All simulated security events for detection and investigation
+- `incident-response-log` — Full audit trail of every orchestrator phase result
+- `incident-metrics` — MTTD/MTTR per-incident records for dashboard tracking
 
 **Event Types:**
 - Authentication logs (login attempts, failures, successes)
@@ -102,7 +124,14 @@ Incident Response Commander is a multi-agent AI system built on Elastic Agent Bu
 
 **Purpose:** Identify security incidents from event patterns
 
-**ES|QL Tools:**
+**ES|QL Tools (detection):**
+- `brute-force-detection` — Auth failures ≥5 in 15 min, breach detection
+- `data-exfiltration-detection` — Outbound bytes > 100 MB in 1 hour
+- `privilege-escalation-detection` — Process privilege_escalation action in 30 min
+- `lateral-movement-detector` — 3+ distinct host logins from same IP in 30 min (T1021)
+- `anomaly-scorer` — Compares 15-min activity to 7-day baseline; returns 0.0–1.0 anomaly score
+- `mitre-attack-mapper` — Maps raw events to 6 MITRE ATT&CK T-codes
+- `campaign-correlation` — Flags IPs with 2+ attack types as coordinated actors
 
 #### Brute Force Detection
 ```sql
@@ -154,6 +183,8 @@ FROM security-simulated-events
 **Purpose:** Correlate events and build attack timelines
 
 **ES|QL Tools:**
+- `incident-correlation` — All events by source IP/user in investigation window
+- `timeline-builder` — Chronological time-bucketed event sequence
 
 #### Incident Correlation
 ```sql
@@ -185,9 +216,12 @@ FROM security-simulated-events
 
 ### 4. Response Layer (Agent 3: RESPONDER)
 
-**Purpose:** Coordinate incident response actions
+**Purpose:** Generate playbooks, send Slack alerts, create Jira tickets
 
-**Integration Method:** Kibana Connectors (Stack Management → Connectors)
+**Integration Method:**
+- `demo/notifications.py` → Slack Block Kit webhook (direct HTTP)
+- `demo/notifications.py` → Jira REST API v3 (direct HTTP)
+- `mttd-mttr-scorecard` ES|QL tool — Reads `incident-metrics` index for scorecard grading
 
 #### Slack Notification
 Sends formatted incident alerts to a Slack channel via a Slack Webhook connector.

@@ -1,0 +1,89 @@
+// mitre-attack-mapper.esql
+// Maps observed event patterns to MITRE ATT&CK techniques.
+// Looks back 1 hour and returns a technique hit count per source IP.
+//
+// Technique coverage:
+//   T1110 — Brute Force          (repeated auth failures)
+//   T1041 — Exfiltration         (large outbound network bytes)
+//   T1068 — Privilege Escalation (privilege_escalation process action)
+//   T1021 — Lateral Movement     (successful logins to 3+ distinct hosts)
+//   T1136 — Create Account       (elevated_process with useradd/usermod)
+//   T1046 — Network Scan         (many failed connections to distinct ports)
+
+FROM security-simulated-events
+| WHERE @timestamp >= NOW() - 1 HOUR
+
+// ── T1110: Brute Force ───────────────────────────────────────────────────────
+| EVAL t1110_hit = CASE(
+    `event.category` == "authentication"
+    AND `event.outcome` == "failure",
+    1, 0
+  )
+
+// ── T1041: Exfiltration ──────────────────────────────────────────────────────
+| EVAL t1041_hit = CASE(
+    `event.category` == "network"
+    AND `network.direction` == "outbound"
+    AND `network.bytes` > 100000000,
+    1, 0
+  )
+
+// ── T1068: Privilege Escalation ──────────────────────────────────────────────
+| EVAL t1068_hit = CASE(
+    `event.category` == "process"
+    AND `event.action` == "privilege_escalation",
+    1, 0
+  )
+
+// ── T1021: Lateral Movement (flag events; count distinct hosts per IP after)
+| EVAL t1021_flag = CASE(
+    `event.category` == "authentication"
+    AND `event.action` == "login"
+    AND `event.outcome` == "success",
+    1, 0
+  )
+
+// ── T1136: Create Account ────────────────────────────────────────────────────
+| EVAL t1136_hit = CASE(
+    `event.category` == "process"
+    AND `event.action` == "elevated_process",
+    1, 0
+  )
+
+// ── T1046: Network Scan ──────────────────────────────────────────────────────
+| EVAL t1046_hit = CASE(
+    `event.category` == "network"
+    AND `event.outcome` == "failure"
+    AND `network.bytes` <= 1024,
+    1, 0
+  )
+
+| STATS
+    t1110_count       = SUM(t1110_hit),
+    t1041_count       = SUM(t1041_hit),
+    t1068_count       = SUM(t1068_hit),
+    t1021_logins      = SUM(t1021_flag),
+    t1021_hosts       = COUNT(DISTINCT `host.name`),
+    t1136_count       = SUM(t1136_hit),
+    t1046_count       = SUM(t1046_hit),
+    total_events      = COUNT(*)
+  BY `source.ip`
+
+// Apply technique thresholds
+| EVAL
+    has_t1110 = CASE(t1110_count >= 5,  1, 0),
+    has_t1041 = CASE(t1041_count >= 1,  1, 0),
+    has_t1068 = CASE(t1068_count >= 1,  1, 0),
+    has_t1021 = CASE(t1021_hosts  >= 3, 1, 0),
+    has_t1136 = CASE(t1136_count >= 1,  1, 0),
+    has_t1046 = CASE(t1046_count >= 5,  1, 0)
+
+| EVAL technique_count = has_t1110 + has_t1041 + has_t1068 + has_t1021 + has_t1136 + has_t1046
+
+| WHERE technique_count > 0
+| SORT  technique_count DESC, total_events DESC
+| KEEP  `source.ip`, technique_count,
+        has_t1110, has_t1041, has_t1068, has_t1021, has_t1136, has_t1046,
+        t1110_count, t1041_count, t1068_count, t1021_hosts, t1136_count, t1046_count,
+        total_events
+| LIMIT 25
