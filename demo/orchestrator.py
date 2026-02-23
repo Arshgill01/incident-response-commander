@@ -158,22 +158,26 @@ def log(level: str, msg: str, indent: int = 0):
 
 
 def build_es_client() -> Elasticsearch:
-    if ELASTIC_CLOUD_ID:
-        if ELASTIC_API_KEY:
-            try:
-                return Elasticsearch(
-                    cloud_id=ELASTIC_CLOUD_ID,
-                    api_key=ELASTIC_API_KEY,
-                    request_timeout=30,
-                )
-            except Exception:
-                pass
-        return Elasticsearch(
-            cloud_id=ELASTIC_CLOUD_ID,
-            basic_auth=(ELASTIC_USERNAME, ELASTIC_PASSWORD),
-            request_timeout=30,
-        )
-    raise RuntimeError("ELASTIC_CLOUD_ID must be set in .env")
+    if not ELASTIC_CLOUD_ID:
+        raise RuntimeError("ELASTIC_CLOUD_ID must be set in .env")
+
+    if ELASTIC_API_KEY and ELASTIC_API_KEY.strip():
+        try:
+            client = Elasticsearch(
+                cloud_id=ELASTIC_CLOUD_ID,
+                api_key=ELASTIC_API_KEY,
+                request_timeout=30,
+            )
+            client.info()  # actually verify — constructor never raises on bad auth
+            return client
+        except Exception:
+            pass  # fall through to basic_auth
+
+    return Elasticsearch(
+        cloud_id=ELASTIC_CLOUD_ID,
+        basic_auth=(ELASTIC_USERNAME, ELASTIC_PASSWORD),
+        request_timeout=30,
+    )
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -196,6 +200,7 @@ def call_llm(system_prompt: str, user_message: str, max_tokens: int = 2048) -> s
     """
     Call the LLM via Kibana Actions connector (unified_completion).
     Returns the assistant's text response.
+    Note: unified_completion does not accept max_tokens — omitted intentionally.
     """
     url = f"{KIBANA_URL}/api/actions/connector/{LLM_CONNECTOR_ID}/_execute"
     payload = {
@@ -207,7 +212,6 @@ def call_llm(system_prompt: str, user_message: str, max_tokens: int = 2048) -> s
                         {"role": "system", "content": system_prompt},
                         {"role": "user", "content": user_message},
                     ],
-                    "max_tokens": max_tokens,
                 }
             },
         }
@@ -228,29 +232,10 @@ def call_llm(system_prompt: str, user_message: str, max_tokens: int = 2048) -> s
 
 def call_agent(agent_id: str, system_prompt: str, user_message: str) -> str:
     """
-    Calls a Kibana Agent Builder agent via the security AI assistant endpoint,
-    injecting agent-specific system instructions. Falls back to direct LLM call.
+    Calls the LLM via Kibana Actions connector (unified_completion) with the
+    agent's system prompt injected. The security AI assistant endpoint is skipped
+    because it streams responses and blocks indefinitely in non-interactive mode.
     """
-    # Try the security AI assistant endpoint with persist=false
-    url = f"{KIBANA_URL}/api/security_ai_assistant/chat/complete"
-    payload = {
-        "connectorId": LLM_CONNECTOR_ID,
-        "persist": False,
-        "messages": [
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": user_message},
-        ],
-    }
-    try:
-        resp = requests.post(
-            url, json=payload, auth=kibana_auth(), headers=kibana_headers(), timeout=90
-        )
-        data = resp.json()
-        if data.get("status") == "ok":
-            return data.get("data", "")
-    except Exception:
-        pass
-    # Fallback to unified_completion
     return call_llm(system_prompt, user_message)
 
 
@@ -262,7 +247,7 @@ def call_agent(agent_id: str, system_prompt: str, user_message: str) -> str:
 def run_esql(es: Elasticsearch, query: str) -> dict:
     """Execute an ES|QL query and return the response dict."""
     try:
-        result = es.esql.query(query=query, request_timeout=30)
+        result = es.options(request_timeout=30).esql.query(query=query)
         return dict(result)
     except Exception as e:
         log("WARN", f"ES|QL query failed: {e}")
@@ -297,8 +282,8 @@ FROM {EVENTS_INDEX}
 | WHERE `event.category` == "authentication" AND `event.outcome` == "failure"
 | STATS
     failure_count = COUNT(*),
-    unique_users = COUNT(DISTINCT `user.name`),
-    unique_hosts = COUNT(DISTINCT `host.name`),
+    unique_users = COUNT_DISTINCT(`user.name`),
+    unique_hosts = COUNT_DISTINCT(`host.name`),
     first_failure = MIN(@timestamp),
     last_failure  = MAX(@timestamp)
   BY `source.ip`
@@ -317,8 +302,8 @@ FROM {EVENTS_INDEX}
 | STATS
     total_bytes        = SUM(`network.bytes`),
     connection_count   = COUNT(*),
-    unique_destinations = COUNT(DISTINCT `destination.ip`),
-    unique_ports       = COUNT(DISTINCT `destination.port`)
+    unique_destinations = COUNT_DISTINCT(`destination.ip`),
+    unique_ports       = COUNT_DISTINCT(`destination.port`)
   BY `user.name`, `source.ip`
 | WHERE total_bytes >= {EXFIL_BYTES_THRESHOLD}
 | SORT total_bytes DESC
@@ -338,7 +323,7 @@ FROM {EVENTS_INDEX}
     OR `event.action` == "elevated_process"
 | STATS
     escalation_count = COUNT(*),
-    unique_processes  = COUNT(DISTINCT `process.name`),
+    unique_processes  = COUNT_DISTINCT(`process.name`),
     first_event       = MIN(@timestamp),
     last_event        = MAX(@timestamp)
   BY `user.name`, `host.name`
@@ -355,7 +340,7 @@ FROM {EVENTS_INDEX}
 | WHERE @timestamp > NOW() - {LATERAL_MOVEMENT_WINDOW}
 | WHERE `event.category` == "authentication" AND `event.outcome` == "success"
 | STATS
-    host_count   = COUNT(DISTINCT `host.name`),
+    host_count   = COUNT_DISTINCT(`host.name`),
     login_count  = COUNT(*),
     first_event  = MIN(@timestamp),
     last_event   = MAX(@timestamp)
@@ -431,7 +416,7 @@ def log_to_es(
         "data": data,
     }
     try:
-        es.index(index=AUDIT_LOG_INDEX, document=doc, request_timeout=10)
+        es.options(request_timeout=10).index(index=AUDIT_LOG_INDEX, document=doc)
     except Exception as e:
         log("WARN", f"Audit log write failed: {e}")
 
@@ -477,7 +462,7 @@ def log_metrics(
         "timestamp": now_iso(),
     }
     try:
-        es.index(index=METRICS_INDEX, document=doc, request_timeout=10)
+        es.options(request_timeout=10).index(index=METRICS_INDEX, document=doc)
     except Exception as e:
         log("WARN", f"Metrics write failed: {e}")
 
@@ -723,7 +708,7 @@ class IncidentOrchestrator:
 
     def _verify_connection(self):
         try:
-            info = self.es.info(request_timeout=10)
+            info = self.es.info()
             log("OK", f"Elasticsearch connected: v{info['version']['number']}")
         except Exception as e:
             log("ERROR", f"Cannot connect to Elasticsearch: {e}")
@@ -808,6 +793,7 @@ class IncidentOrchestrator:
             f"IOCs extracted: {json.dumps(iocs, indent=2, default=str)}\n\n"
             "Provide structured JSON analysis."
         )
+        agent_resp = ""
         try:
             agent_resp = call_agent(DETECTOR_AGENT_ID, DETECTOR_SYSTEM, user_msg)
             # Try to parse JSON from response
@@ -880,6 +866,7 @@ class IncidentOrchestrator:
 
         # Call Investigator Agent
         log("INFO", "Calling Investigator Agent (Kibana Agent Builder)...")
+        agent_resp = ""
         user_msg = (
             f"Investigate this security incident:\n\n"
             f"Detection findings: {json.dumps(detection['agent_analysis'], indent=2, default=str)}\n\n"
@@ -1012,6 +999,7 @@ class IncidentOrchestrator:
 
         # Call Responder Agent
         log("INFO", "Calling Responder Agent (Kibana Agent Builder)...")
+        agent_resp = ""
         user_msg = (
             f"Generate response plan for this confirmed incident:\n\n"
             f"Attack type: {attack_type}\n"
@@ -1148,44 +1136,9 @@ class IncidentOrchestrator:
     def _send_notifications(
         self, incident_id: str, investigation: dict, response_plan: dict, mttr_s: int
     ):
-        """Send Slack alert and create Jira ticket via notifications module."""
-        try:
-            from notifications import NotificationManager
-
-            nm = NotificationManager()
-            slack_data = response_plan.get("slack_message", {})
-            jira_data = response_plan.get("jira_ticket", {})
-
-            if nm.slack_available():
-                nm.send_slack_alert(incident_id, investigation, slack_data, mttr_s)
-                log("OK", "  Slack alert sent", indent=1)
-                log_to_es(
-                    self.es,
-                    incident_id,
-                    "notification",
-                    "slack_sent",
-                    {"channel": os.getenv("SLACK_CHANNEL", "#security-incidents")},
-                )
-
-            if nm.jira_available():
-                ticket_key = nm.create_jira_ticket(
-                    incident_id, investigation, jira_data
-                )
-                log("OK", f"  Jira ticket created: {ticket_key}", indent=1)
-                log_to_es(
-                    self.es,
-                    incident_id,
-                    "notification",
-                    "jira_created",
-                    {"ticket_key": ticket_key},
-                )
-        except ImportError:
-            log("WARN", "  notifications.py not found — using direct fallback")
-            self._direct_slack(incident_id, investigation, response_plan, mttr_s)
-            self._direct_jira(incident_id, investigation, response_plan)
-        except Exception as e:
-            log("WARN", f"  Notification error: {e}")
-            self._direct_slack(incident_id, investigation, response_plan, mttr_s)
+        """Send Slack alert and create Jira ticket."""
+        self._direct_slack(incident_id, investigation, response_plan, mttr_s)
+        self._direct_jira(incident_id, investigation, response_plan)
 
     def _direct_slack(
         self, incident_id: str, investigation: dict, response_plan: dict, mttr_s: int
@@ -1249,6 +1202,13 @@ class IncidentOrchestrator:
             r = requests.post(webhook, json=payload, timeout=10)
             if r.status_code == 200:
                 log("OK", "  Slack alert sent (direct webhook)", indent=1)
+                log_to_es(
+                    self.es,
+                    incident_id,
+                    "notification",
+                    "slack_sent",
+                    {"channel": os.getenv("SLACK_CHANNEL", "#security-incidents")},
+                )
             else:
                 log("WARN", f"  Slack returned {r.status_code}", indent=1)
         except Exception as e:
@@ -1336,6 +1296,13 @@ _Generated by Incident Response Commander — Elastic Agent Builder Hackathon_""
             if r.status_code in (200, 201):
                 key = r.json().get("key", "?")
                 log("OK", f"  Jira ticket created: {key} (direct API)", indent=1)
+                log_to_es(
+                    self.es,
+                    incident_id,
+                    "notification",
+                    "jira_created",
+                    {"ticket_key": key},
+                )
             else:
                 log(
                     "WARN", f"  Jira returned {r.status_code}: {r.text[:200]}", indent=1
@@ -1435,15 +1402,18 @@ _Generated by Incident Response Commander — Elastic Agent Builder Hackathon_""
 
         query = f"""
 FROM {METRICS_INDEX}
-| WHERE @timestamp > NOW() - 24 hours
+| WHERE timestamp > NOW() - 24 hours
+| EVAL is_critical = CASE(severity == "CRITICAL", 1, 0),
+       is_high     = CASE(severity == "HIGH", 1, 0),
+       is_auto     = CASE(automated == true, 1, 0)
 | STATS
     total_incidents  = COUNT(*),
     avg_mttr_seconds = AVG(mttr_seconds),
     min_mttr_seconds = MIN(mttr_seconds),
     max_mttr_seconds = MAX(mttr_seconds),
-    critical_count   = COUNT(CASE WHEN severity == "CRITICAL" THEN 1 END),
-    high_count       = COUNT(CASE WHEN severity == "HIGH" THEN 1 END),
-    automated_count  = COUNT(CASE WHEN automated == true THEN 1 END)
+    critical_count   = SUM(is_critical),
+    high_count       = SUM(is_high),
+    automated_count  = SUM(is_auto)
 """
         try:
             records = esql_to_records(run_esql(self.es, query))
@@ -1476,7 +1446,7 @@ FROM {METRICS_INDEX}
         # Per-attack-type breakdown
         type_query = f"""
 FROM {METRICS_INDEX}
-| WHERE @timestamp > NOW() - 24 hours
+| WHERE timestamp > NOW() - 24 hours
 | STATS
     count            = COUNT(*),
     avg_mttr_seconds = AVG(mttr_seconds)
@@ -1548,8 +1518,15 @@ def main():
     if args.simulate:
         log("INFO", f"Injecting {args.simulate} test data...")
         try:
-            sys.path.insert(0, os.path.dirname(__file__))
-            from incident_simulator import IncidentSimulator
+            import importlib.util
+
+            sim_path = os.path.join(os.path.dirname(__file__), "incident-simulator.py")
+            spec = importlib.util.spec_from_file_location(
+                "incident_simulator", sim_path
+            )
+            sim_mod = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(sim_mod)
+            IncidentSimulator = sim_mod.IncidentSimulator
 
             sim = IncidentSimulator()
             if args.simulate == "apt":
