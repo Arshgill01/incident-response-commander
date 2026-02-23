@@ -28,7 +28,7 @@ A Python **orchestrator** drives the full pipeline autonomously, enforces eviden
 
 ### Orchestrator (the centerpiece)
 
-`demo/orchestrator.py` is a ~600-line Python engine that:
+`demo/orchestrator.py` is a ~1,550-line Python engine that:
 
 - Runs 4 ES|QL detection queries directly via the Elasticsearch Python client (v9.x)
 - Calls the Kibana `unified_completion` connector API to invoke Claude Sonnet with agent-specific system prompts
@@ -68,7 +68,7 @@ A Python **orchestrator** drives the full pipeline autonomously, enforces eviden
 - **Slack Block Kit** — Severity-colour-coded, with emoji-labelled automated vs. human-approval action lists, MITRE technique badges, and MTTD/MTTR metrics
 - **Jira REST API** — Structured Jira-wiki-markup tickets with timeline table, IOC section, impact assessment, and response checklist
 
-### Testing (60+ tests)
+### Testing (167 tests, all passing)
 
 `tests/` covers:
 - Event generation correctness and ECS compliance
@@ -92,7 +92,7 @@ A Python **orchestrator** drives the full pipeline autonomously, enforces eviden
 ## Key Technical Discoveries
 
 1. **No direct agent invocation API** — Agent Builder chat is UI-only. The orchestrator calls the `unified_completion` Kibana connector directly and injects agent system prompts, achieving the same result without UI.
-2. **ES|QL v9 syntax** — `COUNT(DISTINCT x)` not `COUNT_DISTINCT(x)`. Nested fields require backtick escaping (`` `event.category` ``).
+2. **ES|QL syntax** — `COUNT_DISTINCT(x)` not `COUNT(DISTINCT x)`. Nested fields require backtick escaping (`` `event.category` ``).
 3. **ES Python client v9** — `document=` not `body=`; `query=` for ES|QL; `request_timeout=` not `timeout=`.
 4. **Auth** — API key was broken on our deployment. Username/password fallback works reliably.
 5. **Security AI Assistant** (`/api/security_ai_assistant/chat/complete`) — Works for pure LLM calls but does not invoke custom ES|QL tools, so native ES|QL in Python was the right choice.
@@ -107,8 +107,8 @@ A Python **orchestrator** drives the full pipeline autonomously, enforces eviden
 - **Anthropic Claude Sonnet** — LLM backbone via Kibana connector
 - **Python 3.9+** — Orchestrator, simulator, notifications, tests
 - **Slack Block Kit** — Rich incident alert formatting
-- **Jira REST API v3** — Structured ticket creation
-- **pytest** — 60+ unit tests
+- **Jira REST API v2** — Structured ticket creation
+- **pytest** — 167 unit tests (all passing)
 
 ---
 
