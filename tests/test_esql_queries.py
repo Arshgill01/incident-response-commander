@@ -118,10 +118,10 @@ class TestContentCorrectness:
 
     def test_brute_force_has_threshold(self):
         content = load_esql("brute-force-detection.esql")
-        # Should have a numeric threshold (>= 5 or similar)
-        assert re.search(r">=\s*\d+", content), (
-            "brute-force-detection.esql missing threshold"
-        )
+        # Should have a numeric threshold (>= 5) or parameterized threshold (?failure_threshold)
+        has_numeric = re.search(r">=\s*\d+", content)
+        has_param = "?failure_threshold" in content or "failure_threshold" in content
+        assert has_numeric or has_param, "brute-force-detection.esql missing threshold"
 
     def test_exfil_has_bytes_threshold(self):
         content = load_esql("data-exfiltration-detection.esql")

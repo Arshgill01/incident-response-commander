@@ -31,7 +31,7 @@ class TestHelpers:
     def test_incident_id_format(self):
         inc_id = _incident_id()
         assert inc_id.startswith("INC-")
-        assert len(inc_id) == 18  # INC-YYYYMMDD-HHMMSS
+        assert len(inc_id) == 19  # INC-YYYYMMDD-HHMMSS
 
     def test_safe_list_with_list(self):
         assert _safe_list(["a", "b", "c"]) == ["a", "b", "c"]

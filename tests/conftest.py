@@ -7,12 +7,34 @@ ELASTIC_CLOUD_ID + ELASTIC_PASSWORD in the environment (or .env).
 
 import os
 import sys
+import importlib
+import importlib.util
 import pytest
 from unittest.mock import MagicMock, patch
 from datetime import datetime, timezone
 
 # Make demo/ importable from tests/
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "demo"))
+
+# Register incident-simulator.py (hyphenated filename) as 'incident_simulator'
+# so that `import incident_simulator` and `patch("incident_simulator.X")` work.
+# We load it inside patched env vars so the module-level code doesn't sys.exit.
+_sim_path = os.path.join(
+    os.path.dirname(__file__), "..", "demo", "incident-simulator.py"
+)
+if os.path.isfile(_sim_path) and "incident_simulator" not in sys.modules:
+    _spec = importlib.util.spec_from_file_location("incident_simulator", _sim_path)
+    _mod = importlib.util.module_from_spec(_spec)
+    sys.modules["incident_simulator"] = _mod
+    with patch.dict(
+        os.environ,
+        {
+            "ELASTIC_CLOUD_ID": "test:dGVzdA==",
+            "ELASTIC_PASSWORD": "testpass",
+        },
+    ):
+        with patch("elasticsearch.Elasticsearch"):
+            _spec.loader.exec_module(_mod)
 
 # ── Credentials fixture ───────────────────────────────────────────────────────
 
@@ -42,12 +64,18 @@ def has_elastic(elastic_creds):
 
 @pytest.fixture
 def mock_es():
-    """A fully mocked Elasticsearch client."""
+    """A fully mocked Elasticsearch client.
+
+    The orchestrator uses es.options(request_timeout=N).index(...)
+    and es.options(request_timeout=N).esql.query(...), so we set up
+    es.options() to return a mock with the same default return values.
+    """
     es = MagicMock()
     es.info.return_value = {"version": {"number": "8.99.0"}}
     es.index.return_value = {"result": "created", "_id": "mock-id-001"}
     es.indices.refresh.return_value = {"_shards": {"successful": 1}}
-    es.esql.query.return_value = {
+
+    default_esql = {
         "columns": [
             {"name": "source.ip", "type": "ip"},
             {"name": "failed_attempts", "type": "long"},
@@ -55,6 +83,13 @@ def mock_es():
         ],
         "values": [["192.168.1.100", 25, True]],
     }
+    es.esql.query.return_value = default_esql
+
+    # es.options(...) returns a client-like mock with same capabilities
+    opts = es.options.return_value
+    opts.index.return_value = {"result": "created", "_id": "mock-id-002"}
+    opts.esql.query.return_value = default_esql
+
     return es
 
 

@@ -13,31 +13,21 @@ from unittest.mock import MagicMock, patch
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "demo"))
 
+# incident_simulator is registered in conftest.py via importlib (hyphen filename)
+import incident_simulator
+
 
 # ── Fixture: simulator with mocked ES ────────────────────────────────────────
 
 
 @pytest.fixture
 def simulator(mock_es):
-    with patch("incident_simulator.Elasticsearch", return_value=mock_es):
-        with patch.dict(
-            os.environ,
-            {
-                "ELASTIC_CLOUD_ID": "test:dGVzdA==",
-                "ELASTIC_PASSWORD": "testpass",
-            },
-        ):
-            # Import inside patch context so _connect() uses mock
-            import importlib
-            import incident_simulator
-
-            importlib.reload(incident_simulator)
-            sim = incident_simulator.IncidentSimulator.__new__(
-                incident_simulator.IncidentSimulator
-            )
-            sim.es = mock_es
-            sim.target_index = "security-simulated-events"
-            return sim
+    sim = incident_simulator.IncidentSimulator.__new__(
+        incident_simulator.IncidentSimulator
+    )
+    sim.es = mock_es
+    sim.target_index = "security-simulated-events"
+    return sim
 
 
 # ── Brute Force ───────────────────────────────────────────────────────────────

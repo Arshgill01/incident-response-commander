@@ -17,6 +17,9 @@ from unittest.mock import MagicMock, patch
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "demo"))
 
+# incident_simulator is registered in conftest.py via importlib (hyphen filename)
+import incident_simulator
+
 
 # ── ECS field validators ──────────────────────────────────────────────────────
 
@@ -56,24 +59,12 @@ class TestECSCompliance:
 
     @pytest.fixture
     def sim(self, mock_es):
-        with patch("incident_simulator.Elasticsearch", return_value=mock_es):
-            with patch.dict(
-                os.environ,
-                {
-                    "ELASTIC_CLOUD_ID": "test:dGVzdA==",
-                    "ELASTIC_PASSWORD": "testpass",
-                },
-            ):
-                import importlib
-                import incident_simulator
-
-                importlib.reload(incident_simulator)
-                sim = incident_simulator.IncidentSimulator.__new__(
-                    incident_simulator.IncidentSimulator
-                )
-                sim.es = mock_es
-                sim.target_index = "security-simulated-events"
-                return sim
+        sim = incident_simulator.IncidentSimulator.__new__(
+            incident_simulator.IncidentSimulator
+        )
+        sim.es = mock_es
+        sim.target_index = "security-simulated-events"
+        return sim
 
     def test_brute_force_events_are_ecs_compliant(self, sim):
         events, _ = sim.generate_brute_force_attack()
@@ -136,60 +127,31 @@ class TestECSCompliance:
 class TestIndexConventions:
     def test_target_index_name(self):
         """Security events must go to security-simulated-events."""
-        with patch(
-            "incident_simulator.Elasticsearch",
-            return_value=MagicMock(
-                info=MagicMock(return_value={"version": {"number": "8.0.0"}})
-            ),
-        ):
-            with patch.dict(
-                os.environ,
-                {
-                    "ELASTIC_CLOUD_ID": "test:dGVzdA==",
-                    "ELASTIC_PASSWORD": "testpass",
-                },
-            ):
-                import importlib
-                import incident_simulator
-
-                importlib.reload(incident_simulator)
-                sim = incident_simulator.IncidentSimulator.__new__(
-                    incident_simulator.IncidentSimulator
-                )
-                sim.target_index = "security-simulated-events"
-                assert sim.target_index == "security-simulated-events"
+        sim = incident_simulator.IncidentSimulator.__new__(
+            incident_simulator.IncidentSimulator
+        )
+        sim.target_index = "security-simulated-events"
+        assert sim.target_index == "security-simulated-events"
 
     def test_ingest_calls_correct_index(self, mock_es):
-        with patch("incident_simulator.Elasticsearch", return_value=mock_es):
-            with patch.dict(
-                os.environ,
-                {
-                    "ELASTIC_CLOUD_ID": "test:dGVzdA==",
-                    "ELASTIC_PASSWORD": "testpass",
-                },
-            ):
-                import importlib
-                import incident_simulator
-
-                importlib.reload(incident_simulator)
-                sim = incident_simulator.IncidentSimulator.__new__(
-                    incident_simulator.IncidentSimulator
-                )
-                sim.es = mock_es
-                sim.target_index = "security-simulated-events"
-                test_events = [
-                    {
-                        "@timestamp": datetime.now(timezone.utc).strftime(
-                            "%Y-%m-%dT%H:%M:%S.%fZ"
-                        ),
-                        "event": {"category": "authentication", "outcome": "failure"},
-                        "source": {"ip": "1.2.3.4"},
-                        "user": {"name": "admin"},
-                        "host": {"name": "server-01"},
-                        "message": "Test event",
-                    }
-                ]
-                sim.ingest_events(test_events)
-                mock_es.index.assert_called_once()
-                call_kwargs = mock_es.index.call_args
-                assert "security-simulated-events" in str(call_kwargs)
+        sim = incident_simulator.IncidentSimulator.__new__(
+            incident_simulator.IncidentSimulator
+        )
+        sim.es = mock_es
+        sim.target_index = "security-simulated-events"
+        test_events = [
+            {
+                "@timestamp": datetime.now(timezone.utc).strftime(
+                    "%Y-%m-%dT%H:%M:%S.%fZ"
+                ),
+                "event": {"category": "authentication", "outcome": "failure"},
+                "source": {"ip": "1.2.3.4"},
+                "user": {"name": "admin"},
+                "host": {"name": "server-01"},
+                "message": "Test event",
+            }
+        ]
+        sim.ingest_events(test_events)
+        mock_es.index.assert_called_once()
+        call_kwargs = mock_es.index.call_args
+        assert "security-simulated-events" in str(call_kwargs)
